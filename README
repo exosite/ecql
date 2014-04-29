@@ -1,0 +1,90 @@
+TEST INSTRUCTIONS
+
+# Cassandra start as root
+
+# Snappy
+# Cassandra connections:2 streams:100 workers:4 maxbatch 1000
+du -sh /home/admin/oneplatform/dest/cassandra/*
+1.0G    /home/admin/oneplatform/dest/cassandra/commitlog
+3.5G    /home/admin/oneplatform/dest/cassandra/data
+20K     /home/admin/oneplatform/dest/cassandra/saved_caches
+70min
+
+# Cassandra connections:4 streams:25 workers:8 maxbatch 20000
+70min
+
+# Cassandra connections:4 streams:25 workers:8 maxbatch 20000
+memtable_flush_writers: 3
+trickle_fsync: true
+multithreaded_compaction: true
+compaction_throughput_mb_per_sec: 0
+60m
+
+
+# Cassandra row cache size (check in opscenter)
+# Cassandra replication_factor: 1 ?
+
+# Cassandra sstable size 128
+# Cassandra disable compaction cap compaction_throughput_mb_per_sec = 0
+# Problem was that import script was broken (swapped timestamp and metric)
+
+
+
+
+
+
+supervisor:terminate_child(opdispatcher_sup,opdispatcher_sms).
+supervisor:delete_child(opdispatcher_sup,opdispatcher_sms).
+
+supervisor:terminate_child(opprocessor_sup,opprocessor_scripting_sup).
+supervisor:delete_child(opprocessor_sup,opprocessor_scripting_sup).
+
+% notebook: 23 sec (no compression)
+
+
+Table = "CREATE TABLE record_name (a int PRIMARY KEY, b int) WITH caching = 'none';".
+cassandra:create_once(Table).
+
+f(Table2).
+Table2 = "CREATE TABLE record_name2 (a int PRIMARY KEY, b int) WITH
+    bloom_filter_fp_chance=0.010000 AND
+    caching='KEYS_ONLY' AND
+    comment='' AND
+    dclocal_read_repair_chance=0.000000 AND
+    gc_grace_seconds=864000 AND
+    index_interval=128 AND
+    read_repair_chance=0.100000 AND
+    replicate_on_write='true' AND
+    populate_io_cache_on_flush='false' AND
+    default_time_to_live=0 AND
+    speculative_retry='99.0PERCENTILE' AND
+    compaction={'class': 'LeveledCompactionStrategy'} AND
+    memtable_flush_period_in_ms=3600000 AND
+    compression={'sstable_compression': 'LZ4Compressor'};".
+cassandra:create_once(Table2).
+
+% compaction={'size_limit_in_mb': '800', 'class': 'MemoryOnlyStrategy'} AND
+% compaction={'class': 'SizeTieredCompactionStrategy'} AND
+
+
+
+timer:tc(fun() ->
+    lists:foreach(
+      fun(Each) ->
+          cassandra:execute_async("INSERT INTO record_name (a, b) VALUES(?, ?)", [Each, Each])
+         ,Each = cassandra:select_value("SELECT b FROM record_name WHERE a = ?", [Each])
+      end
+     ,lists:seq(1, 50000)
+    )
+  end).
+
+timer:tc(fun() ->
+    lists:foreach(
+      fun(Each) ->
+          cassandra:execute_async("INSERT INTO record_name2 (a, b) VALUES(?, ?)", [Each, Each])
+         ,Each = cassandra:select_value("SELECT b FROM record_name2 WHERE a = ?", [Each])
+      end
+     ,lists:seq(1, 50000)
+    )
+  end).
+
