@@ -1,34 +1,33 @@
 %%==============================================================================
 %% Copyright (c) Exosite LLC
 %%
-%% cassandra.app - OTP-compliant Application Configuration File
+%% ecql.app - OTP-compliant Application Configuration File
 %%==============================================================================
 
   {
-    application ,cassandra ,[
-       {description ,"Cassandra"}
+    application ,ecql ,[
+       {description ,"ecql"}
       ,{vsn ,"2014-04-17"}
       ,{modules ,[
-         cassandra
-        ,cassandra_cache
-        ,cassandra_connection
-        ,cassandra_perf
-        ,cassandra_sender
-        ,cassandra_stream
-        ,cassandra_sup
-        ,camnesia
+         ecql
+        ,ecql_cache
+        ,ecql_connection
+        ,ecql_sender
+        ,ecql_stream
+        ,ecql_sup
+        ,ecql_mnesia
       ]}
       ,{registered ,[
-         cassandra
-        ,cassandra_cache
-        ,cassandra_sup
+         ecql
+        ,ecql_cache
+        ,ecql_sup
       ]}
       ,{applications ,[
          kernel
         ,sasl
         ,stdlib
       ]}
-      ,{mod ,{cassandra ,[]}}
+      ,{mod ,{ecql ,[]}}
       ,{env, [
          {user, ""}
         ,{pass, ""}
