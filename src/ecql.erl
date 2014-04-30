@@ -86,21 +86,32 @@ init(_) ->
 .
 init_keyspace(Configuration) ->
    {ok, Connection} = ecql_connection:start_link(Configuration)
-  ,Stream = ecql_connection:get_stream(Connection)
   ,Keyspace = proplists:get_value(keyspace, Configuration, "ecql")
-  ,RStrategy = proplists:get_value(replication_strategy, Configuration, "SimpleStrategy")
-  ,RFactor = proplists:get_value(replication_factor, Configuration, 2)
-  ,ok = accept_duplicate(ecql_stream:query(Stream, [
+  ,Factor = proplists:get_value(replication_factor, Configuration, 2)
+  ,Stream = ecql_connection:get_stream(Connection)
+  ,Strategy = proplists:get_value(replication_strategy, Configuration, "SimpleStrategy")
+  ,CQL = [
      "CREATE KEYSPACE "
     ,Keyspace
     ," with REPLICATION = {'class':'"
-    ,RStrategy
-    ,"', 'replication_factor':"
-    ,integer_to_list(RFactor)
+    ,Strategy
+    ,"'"
+    ,data_centers(Strategy, Factor)
     ,"} "
-   ]))
-   ,ok = ecql_connection:stop(Connection)
+   ]
+  ,accept_duplicate(ecql_stream:query(Stream, CQL))
+  ,ok = ecql_connection:stop(Connection)
 .
+data_centers("SimpleStrategy", Factor) ->
+  [", 'replication_factor':", integer_to_list(Factor)]
+;
+data_centers("NetworkTopologyStrategy", []) ->
+  []
+;
+data_centers("NetworkTopologyStrategy" = S, [{Name, Factor} | Rest]) ->
+  [", '", Name, "':", integer_to_list(Factor) | data_centers(S, Rest)]
+.
+
 init_connection_pool(0, _) ->
   []
 ;

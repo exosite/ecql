@@ -36,6 +36,8 @@
         ,{keyspace, "ecql"}
         ,{replication_strategy, "SimpleStrategy"}
         ,{replication_factor, 2}
+        %,{replication_strategy, "NetworkTopologyStrategy"}
+        %,{replication_factor, [{"dc1", 3}, {"dc2", 2}]}
         ,{connections, 4}
         ,{streams_per_connection, 25}
       ]}
