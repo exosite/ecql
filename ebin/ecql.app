@@ -33,6 +33,9 @@
         ,{pass, ""}
         ,{host, {127,0,0,1}}
         ,{port, 9042}
+        ,{keyspace, "ecql"}
+        ,{replication_strategy, "SimpleStrategy"}
+        ,{replication_factor, 2}
         ,{connections, 4}
         ,{streams_per_connection, 25}
       ]}

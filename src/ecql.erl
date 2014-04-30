@@ -87,9 +87,17 @@ init(_) ->
 init_keyspace(Configuration) ->
    {ok, Connection} = ecql_connection:start_link(Configuration)
   ,Stream = ecql_connection:get_stream(Connection)
+  ,Keyspace = proplists:get_value(keyspace, Configuration, "ecql")
+  ,RStrategy = proplists:get_value(replication_strategy, Configuration, "SimpleStrategy")
+  ,RFactor = proplists:get_value(replication_factor, Configuration, 2)
   ,ok = accept_duplicate(ecql_stream:query(Stream, [
-     "CREATE KEYSPACE catalog with "
-    ,"REPLICATION = {'class':'SimpleStrategy', 'replication_factor':2} "
+     "CREATE KEYSPACE "
+    ,Keyspace
+    ," with REPLICATION = {'class':'"
+    ,RStrategy
+    ,"', 'replication_factor':"
+    ,integer_to_list(RFactor)
+    ,"} "
    ]))
    ,ok = ecql_connection:stop(Connection)
 .
@@ -101,8 +109,9 @@ init_connection_pool(N, Configuration) ->
 .
 init_connection(Configuration) ->
    {ok, Connection} = ecql_connection:start_link(Configuration)
+  ,Keyspace = proplists:get_value(keyspace, Configuration, "ecql")
   ,lists:foreach(
-     fun(Stream0) -> ecql_stream:query(Stream0, "USE catalog") end
+     fun(Stream0) -> ecql_stream:query(Stream0, ["USE ", Keyspace]) end
     ,ecql_connection:get_streams(Connection)
    )
   ,Connection
