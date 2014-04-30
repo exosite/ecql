@@ -128,8 +128,6 @@ init_connection(Configuration) ->
   ,Connection
 .
 
-
-
 %%------------------------------------------------------------------------------
 stop() ->
   gen_server:call(?MODULE, stop)
@@ -166,7 +164,6 @@ terminate(_Reason, State) ->
 code_change(_ ,State ,_) ->
   {ok ,State}
 .
-
 
 %%-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 %% Public API

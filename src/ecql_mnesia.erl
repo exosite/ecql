@@ -148,7 +148,7 @@ dirty_write(Record)  ->
 .
 write(Record) when is_tuple(Record) ->
    [RecordName | RecordValues] = RecordList = tuple_to_list(Record)
-  ,ecql_cache:set({RecordName, hd(RecordValues)}, [Record])
+  ,ecql_cache:dirty({RecordName, hd(RecordValues)})
   ,[
     ecql_cache:dirty({RecordName, element(I, Record), I})
     || I <- lists:seq(3, length(RecordValues)+1), is_binary(element(I, Record))
@@ -246,10 +246,22 @@ delete_object(Record) when is_tuple(Record) ->
     ecql_cache:dirty({RecordName, element(I, Record), I})
     || I <- lists:seq(3, length(RecordValues)+1), is_binary(element(I, Record))
    ]
+  ,{RecordName, Table} = lists:keyfind(RecordName, 1, get_tables())
+  ,{type, Type} = lists:keyfind(type, 1, Table)
+  ,do_delete_object(Type, RecordName, RecordValues)
+.
+do_delete_object(set, RecordName, RecordValues) ->
+   ecql:execute(
+     ["DELETE FROM ", map_recordname(RecordName), " WHERE a = ?"]
+    ,[ecql:term_to_bin(hd(RecordValues))]
+   )
+;
+do_delete_object(bag, RecordName, RecordValues) ->
+   {Keys, Values} = and_pairs(RecordValues)
   ,ecql:execute([
      "DELETE FROM ", map_recordname(RecordName)
-    ," WHERE a = ?"
-  ], [ecql:term_to_bin(hd(RecordValues))])
+    ," WHERE ", Keys
+  ], Values)
 .
 
 
@@ -301,10 +313,13 @@ do_wait_for_tables(Tables, Number) ->
 %%------------------------------------------------------------------------------
 system_info(tables) ->
    {_, Tables} = ecql:select([
-     "SELECT columnfamily_name, comment FROM system.schema_columnfamilies "
-    ,"WHERE keyspace_name = 'catalog'"
+     "SELECT columnfamily_name, comment FROM system.schema_columnfamilies"
    ])
-  ,[unmap_recordname(TableName) || [TableName, Comment] <- Tables, Comment =:= "ecql_mnesia"]
+  ,[
+    unmap_recordname(TableName)
+    || [TableName, Comment] <- Tables
+      ,string:left(Comment, 11) =:= "ecql_mnesia"
+   ]
 ;
 system_info(use_dir) ->
   false
@@ -332,16 +347,9 @@ table_info(_Table ,where_to_commit) ->
 
 %%------------------------------------------------------------------------------
 create_table(Name ,Def) ->
-   {attributes, Fields} = lists:keyfind(attributes, 1, Def)
-  ,ok = ecql:create_table(
-     map_recordname(Name)
-    ,[
-       "a blob PRIMARY KEY, "
-      ,implode(" blob, ", [map_fieldindex(I) || I <- lists:seq(1, length(Fields)-1)])
-      ," blob"
-     ]
-    ,"ecql_mnesia"
-   )
+   {type, Type} = lists:keyfind(type, 1, Def)
+  ,{attributes, Fields} = lists:keyfind(attributes, 1, Def)
+  ,ok = do_create_table(Type, Name, Fields)
   ,case lists:keyfind(index, 1, Def) of
     {index, Indexes} ->
        lists:foreach(
@@ -359,7 +367,33 @@ create_table(Name ,Def) ->
        ok
     %~
    end
+  ,ok = application:set_env(ecql, tables, undefined)
   ,{atomic ,ok}
+.
+do_create_table(set, Name, Fields) ->
+  ecql:create_table(
+     map_recordname(Name)
+    ,[
+       "a blob PRIMARY KEY, "
+      ,implode(" blob, ", [map_fieldindex(I) || I <- lists:seq(1, length(Fields)-1)])
+      ," blob"
+     ]
+    ,"ecql_mnesia_set"
+  )
+;
+do_create_table(bag, Name, Fields) ->
+  ecql:create_table(
+     map_recordname(Name)
+    ,[
+       "a blob, "
+      ,implode(" blob, ", [map_fieldindex(I) || I <- lists:seq(1, length(Fields)-1)])
+      ," blob, "
+      ,"PRIMARY KEY(a, "
+      ,implode(", ", [map_fieldindex(I) || I <- lists:seq(1, length(Fields)-1)])
+      ,")"
+     ]
+    ,"ecql_mnesia_bag"
+  )
 .
 
 %%------------------------------------------------------------------------------
@@ -723,6 +757,34 @@ split(NObjects ,ResultList) when length(ResultList) > NObjects ->
 ;
 split(_NObjects ,ResultList) ->
   {ResultList ,[]}
+.
+
+%%------------------------------------------------------------------------------
+get_tables() ->
+  case application:get_key(ecql, tables) of
+    undefined ->
+       {_, Tables} = ecql:select([
+         "SELECT columnfamily_name, comment FROM system.schema_columnfamilies"
+       ])
+      ,[
+        {
+           unmap_recordname(TableName)
+          ,[{
+             type
+            ,case Comment of
+               "ecql_mnesia_set" -> set
+              ;"ecql_mnesia_bag" -> bag
+             end
+           }]
+        }
+        || [TableName, Comment] <- Tables
+          ,string:left(Comment, 11) =:= "ecql_mnesia"
+       ]
+    ;
+    {ok, Tables} ->
+      Tables
+    %~
+  end
 .
 
 %%==============================================================================
