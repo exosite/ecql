@@ -11,6 +11,8 @@
 
 -define(DUPLICATE_TABLE, 9216).
 -define(DUPLICATE_INDEX, 8704).
+% Compare default settings with CASSANDRA-5727
+-define(COMPACTION, "compaction = {'class': 'LeveledCompactionStrategy', 'sstable_size_in_mb': 160}").
 
 %% OTP application
 -export([start/2, stop/1]).
@@ -240,7 +242,7 @@ create_once(Cql) ->
 create_table(Tablename, Body) ->
   create_once([
      "CREATE TABLE ", Tablename, " ( ", Body, " ) WITH "
-    ," compaction = {'class': 'LeveledCompactionStrategy', 'sstable_size_in_mb': 20} AND caching = 'all' "
+    ,?COMPACTION
     ,";"
   ])
 .
@@ -249,7 +251,7 @@ create_table(Tablename, Body) ->
 create_table(Tablename, Body, Comment) ->
   create_once([
      "CREATE TABLE ", Tablename, " ( ", Body, " ) WITH "
-    ," compaction = {'class': 'LeveledCompactionStrategy', 'sstable_size_in_mb': 20} AND caching = 'all' "
+    ,?COMPACTION
     ," AND comment='", Comment, "';"
   ])
 .
