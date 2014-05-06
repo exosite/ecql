@@ -334,7 +334,15 @@ anystream() ->
       ,Stream
     ;
     LastStream ->
-      LastStream
+      case is_process_alive(LastStream) of
+        true ->
+           LastStream
+        ;
+        false ->
+           put(last_ccon, undefined)
+          ,anystream()
+        %~
+      end
     %~
   end
 .
