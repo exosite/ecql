@@ -36,12 +36,12 @@
 
 %%------------------------------------------------------------------------------
 get_stream(Connection) ->
-  gen_server:call(Connection, get_stream)
+  gen_server:call(Connection, get_stream, infinity)
 .
 
 %%------------------------------------------------------------------------------
 get_streams(Connection) ->
-  tuple_to_list(gen_server:call(Connection, get_streams))
+  tuple_to_list(gen_server:call(Connection, get_streams, infinity))
 .
 
 %%-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
