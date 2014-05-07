@@ -156,7 +156,7 @@ write(Record) when is_tuple(Record) ->
   ,write(RecordList)
 ;
 write([RecordName | RecordValues]) when is_atom(RecordName) ->
-  ecql:execute_async([
+  ecql:execute([
      "INSERT INTO ", map_recordname(RecordName)
     ," ("
     ,implode($,, fields(RecordValues))
