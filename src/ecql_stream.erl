@@ -170,6 +170,10 @@ log(?OP_ERROR, Body) ->
 log(_ResponseOpCode, _ResponseBody) ->
   ok
 .
+do_log({error, ?ER_UNPREPARED, _Message}) ->
+  %% Error already logged from handle_response.
+  ok
+;
 do_log({error, Code, Message}) ->
   error_logger:error_msg("query_async: failed: {error, ~p, ~s}~n", [Code, Message])
 ;
@@ -247,10 +251,11 @@ prepare_statement(Cql, State) ->
     [] ->
        State1 = wait_async(State)
       ,StatementRec = prepare_query(Cql, State1)
-      ,ets:insert(ecql_statements, {Statement, StatementRec})
+      ,Id = StatementRec#preparedstatement.id
+      ,ets:insert(ecql_statements, {Statement, StatementRec ,Id})
       ,{StatementRec, State1}
     ;
-    [{Statement, StatementRec}] ->
+    [{Statement, StatementRec ,_Id}] ->
        {StatementRec, State}
     %~
    end
@@ -311,6 +316,13 @@ handle_response(OpCode, Body, _) ->
 .
 
 %%------------------------------------------------------------------------------
+handle_response(?OP_ERROR, <<?ER_UNPREPARED:?T_INT32, Len:?T_UINT16, Message:Len/binary, IdLen:?T_UINT16, Id:IdLen/binary>>) ->
+   ets:match_delete(ecql_statements ,{'_', '_', Id})
+  ,SMessage = binary_to_list(Message)
+  ,SId = binary_to_list(Id)
+  ,error_logger:error_msg("query failed: {error, ~p, ~s ,~s}~n", [?ER_UNPREPARED, Message ,SId])
+  ,{error, ?ER_UNPREPARED, SMessage}
+;
 handle_response(?OP_ERROR, <<Code:?T_INT32, _Len:?T_UINT16, Message/binary>>) ->
   {error, Code, binary_to_list(Message)}
 ;

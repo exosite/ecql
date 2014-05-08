@@ -38,5 +38,7 @@
 -define(RT_PREPARED, 4:?T_INT32).
 -define(RT_SCHEMACHANGE, 5:?T_INT32).
 
+-define(ER_UNPREPARED ,16#2500).
+
 %%==============================================================================
 %% END OF FILE
