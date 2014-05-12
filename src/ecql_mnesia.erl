@@ -313,7 +313,7 @@ do_wait_for_tables(Tables, Number) ->
 %%------------------------------------------------------------------------------
 system_info(tables) ->
    {_, Tables} = ecql:select([
-     "SELECT columnfamily_name, comment FROM system.schema_columnfamilies"
+     "SELECT columnfamily_name, comment FROM  system.schema_columnfamilies"
    ])
   ,[
     unmap_recordname(TableName)
@@ -367,7 +367,7 @@ create_table(Name ,Def) ->
        ok
     %~
    end
-  ,ok = application:set_env(ecql, tables, undefined)
+  ,ok = ecql:config(tables, undefined)
   ,{atomic ,ok}
 .
 do_create_table(set, Name, Fields) ->
@@ -761,12 +761,12 @@ split(_NObjects ,ResultList) ->
 
 %%------------------------------------------------------------------------------
 get_tables() ->
-  case application:get_key(ecql, tables) of
+  case ecql:config(tables) of
     undefined ->
-       {_, Tables} = ecql:select([
+       {_, CQLTables} = ecql:select([
          "SELECT columnfamily_name, comment FROM system.schema_columnfamilies"
        ])
-      ,[
+      ,Tables = [
         {
            unmap_recordname(TableName)
           ,[{
@@ -777,11 +777,13 @@ get_tables() ->
              end
            }]
         }
-        || [TableName, Comment] <- Tables
+        || [TableName, Comment] <- CQLTables
           ,string:left(Comment, 11) =:= "ecql_mnesia"
        ]
+      ,ok = ecql:config(tables, Tables)
+      ,Tables
     ;
-    {ok, Tables} ->
+    Tables ->
       Tables
     %~
   end

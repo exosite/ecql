@@ -30,7 +30,9 @@
 
 %% Public API
 -export([
-   execute/1
+   config/1
+  ,config/2
+  ,execute/1
   ,execute/2
   ,execute_async/1
   ,execute_async/2
@@ -132,13 +134,20 @@ init_connection(Configuration) ->
 
 %%------------------------------------------------------------------------------
 stop() ->
-  gen_server:call(?MODULE, stop)
+  gen_server:call(?MODULE, stop, infinity)
 .
 
 %%------------------------------------------------------------------------------
 handle_call(stop, _From, State = #state{clients = Connections}) ->
    [ecql_connection:stop(Connection) || Connection <- tuple_to_list(Connections)]
   ,{stop ,normal ,ok ,State}
+;
+handle_call({config, Key}, _From, State = #state{settings = Configuration}) ->
+   {reply, proplists:get_value(Key, Configuration, undefined), State}
+;
+handle_call({config, Key, Value}, _From, S = #state{settings = Configuration}) ->
+   S1 = S#state{settings = lists:keystore(Key, 1, Configuration, {Key, Value})}
+  ,{reply, ok, S1}
 ;
 handle_call(connection, _From, State = #state{clients = Connections, counter = Counter}) ->
    ConnectionId = (Counter rem size(Connections)) + 1
@@ -170,6 +179,16 @@ code_change(_ ,State ,_) ->
 %%-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 %% Public API
 %%-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+
+%%------------------------------------------------------------------------------
+config(Key) ->
+  gen_server:call(?MODULE, {config, Key}, infinity)
+.
+
+%%------------------------------------------------------------------------------
+config(Key, Value) ->
+  gen_server:call(?MODULE, {config, Key, Value}, infinity)
+.
 
 %%------------------------------------------------------------------------------
 select_value(Cql) ->
@@ -328,7 +347,7 @@ indexof(Element, [_ | Tail]) ->
 anystream() ->
   case get(last_ccon) of
     undefined ->
-       Connection = gen_server:call(?MODULE, connection, 10000)
+       Connection = gen_server:call(?MODULE, connection, infinity)
       ,Stream = ecql_connection:get_stream(Connection)
       ,put(last_ccon, Stream)
       ,Stream
