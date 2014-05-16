@@ -40,5 +40,16 @@
 
 -define(ER_UNPREPARED ,16#2500).
 
+-define(CL_ONE, 16#0001).
+-define(CL_TWO, 16#0002).
+-define(CL_THREE, 16#0003).
+-define(CL_QUORUM, 16#0004).
+-define(CL_ALL, 16#0005).
+-define(CL_LOCAL_QUORUM, 16#0006).
+-define(CL_EACH_QUORUM, 16#0007).
+-define(CL_SERIAL, 16#0008).
+-define(CL_LOCAL_SERIAL, 16#0009).
+-define(CL_LOCAL_ONE, 16#000A).
+
 %%==============================================================================
 %% END OF FILE

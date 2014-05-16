@@ -9,10 +9,9 @@
 %% Public API
 -export([
    query/2
-  ,query/3
-  ,query_async/2
-  ,query_async/3
-  ,query_batch/3
+  ,query/4
+  ,query_async/4
+  ,query_batch/4
 ]).
 
 %% OTP gen_server
@@ -45,34 +44,31 @@
 
 %%------------------------------------------------------------------------------
 query(Id, Cql) ->
-  query(Id, Cql, [])
+  query(Id, Cql, [], ?CL_ONE)
 .
-query(Id, Cql, Args) ->
-  gen_server:call(Id, {query, Cql, Args}, ?TIMEOUT)
+query(Id, Cql, Args, Consistency) ->
+  gen_server:call(Id, {query, Cql, Args, Consistency}, ?TIMEOUT)
 .
 
 %%------------------------------------------------------------------------------
-query_async(Id, Cql) ->
-  query_async(Id, Cql, [])
-.
-query_async(Id, Cql, Args) ->
+query_async(Id, Cql, Args, Consistency) ->
    case tick(?MAX_PENDING) of
       true ->
-        gen_server:call(Id, {query, Cql, Args}, ?TIMEOUT)
+        gen_server:call(Id, {query, Cql, Args, Consistency}, ?TIMEOUT)
       ;
       false ->
-        gen_server:cast(Id, {query, Cql, Args})
+        gen_server:cast(Id, {query, Cql, Args, Consistency})
       %~
    end
   ,ok
 .
 
 %%------------------------------------------------------------------------------
-query_batch(_, _, []) ->
+query_batch(_, _, [], _) ->
   ok
 ;
-query_batch(Id, Cql, ListOfArgs) ->
-  gen_server:call(Id, {query_batch, Cql, ListOfArgs}, ?TIMEOUT)
+query_batch(Id, Cql, ListOfArgs ,Consistency) ->
+  gen_server:call(Id, {query_batch, Cql, ListOfArgs, Consistency}, ?TIMEOUT)
 .
 
 %%-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
@@ -95,19 +91,19 @@ stop(Stream) ->
 .
 
 %%------------------------------------------------------------------------------
-handle_call({query, Cql, []}, _From, State) ->
+handle_call({query, Cql, [], Consistency}, _From, State) ->
    State1 = wait_async(State)
-  ,execute_query(Cql, State1)
+  ,execute_query(Cql, [], Consistency, State1)
   ,{reply, recv_frame(), State1}
 ;
-handle_call({query, Cql, Args}, _From, State) ->
+handle_call({query, Cql, Args, Consistency}, _From, State) ->
    State1 = wait_async(State)
-  ,{ok, Metadata, State2} = execute_query(Cql, Args, State1)
+  ,{ok, Metadata, State2} = execute_query(Cql, Args, Consistency, State1)
   ,{reply, recv_frame(Metadata), State2}
 ;
-handle_call({query_batch, Cql, ListOfArgs}, _From, State) ->
+handle_call({query_batch, Cql, ListOfArgs, Consistency}, _From, State) ->
    State1 = wait_async(State)
-  ,{ok, State2} = execute_batch(Cql, ListOfArgs, State1)
+  ,{ok, State2} = execute_batch(Cql, ListOfArgs, Consistency, State1)
   ,{reply, recv_frame(), State2}
 ;
 handle_call(stop, _From, State) ->
@@ -115,16 +111,16 @@ handle_call(stop, _From, State) ->
 .
 
 %%------------------------------------------------------------------------------
-handle_cast({query, Cql, []}, State = #state{async_pending = Pending}) ->
-   execute_query(Cql, State)
+handle_cast({query, Cql, [], Consistency}, State = #state{async_pending = Pending}) ->
+   execute_query(Cql, [], Consistency, State)
   ,{noreply, State#state{async_pending = Pending + 1}}
 ;
-handle_cast({query, Cql, Args}, State) ->
-   {ok, _, State1 = #state{async_pending = Pending}} = execute_query(Cql, Args, State)
+handle_cast({query, Cql, Args, Consistency}, State) ->
+   {ok, _, State1 = #state{async_pending = Pending}} = execute_query(Cql, Args, Consistency, State)
   ,{noreply, State1#state{async_pending = Pending + 1}}
 ;
-handle_cast({query_batch, Cql, ListOfArgs}, State) ->
-   {ok, State1 = #state{async_pending = Pending}} = execute_batch(Cql, ListOfArgs, State)
+handle_cast({query_batch, Cql, ListOfArgs, Consistency}, State) ->
+   {ok, State1 = #state{async_pending = Pending}} = execute_batch(Cql, ListOfArgs, Consistency, State)
   ,{noreply, State1#state{async_pending = Pending + 1}}
 ;
 handle_cast(terminate ,State) ->
@@ -183,28 +179,26 @@ do_log(Error) ->
 
 %%------------------------------------------------------------------------------
 % Executes a single plain query
-execute_query(Cql, State) ->
-   Query = [
+execute_query(Cql, [], Consistency, State) ->
+  Query = [
      wire_longstring(Cql)
     ,<<
-       1:?T_UINT16 % consistency one
+       Consistency:?T_UINT16
       ,0:?T_UINT8 % flag
      >>
    ]
   ,ok = send_frame(State, ?OP_QUERY, Query)
   ,ok
-.
-
-%%------------------------------------------------------------------------------
+;
 % Lazily prepares a query that has args and then executes it
-execute_query(Cql, Args, State) ->
+execute_query(Cql, Args, Consistency, State) ->
    {StatementRec, State1} = prepare_statement(Cql, State)
   ,#preparedstatement{id = Id, result_metadata = Metadata, metadata = RequestMetadata} = StatementRec
   ,Query = [
      <<
        (size(Id)):?T_UINT16
       ,Id/binary
-      ,1:?T_UINT16 % consistency one
+      ,Consistency:?T_UINT16
       ,3:?T_UINT8 % flag skip_metadata[2] + values[1]
      >>
     ,wire_values(Args, RequestMetadata)
@@ -214,7 +208,7 @@ execute_query(Cql, Args, State) ->
 .
 
 %%------------------------------------------------------------------------------
-execute_batch(Cql, ListOfArgs, State) ->
+execute_batch(Cql, ListOfArgs, Consistency, State) ->
    {StatementRec, State1} = prepare_statement(Cql, State)
   ,#preparedstatement{id = Id, metadata = RequestMetadata} = StatementRec
   ,Query = [
@@ -222,17 +216,17 @@ execute_batch(Cql, ListOfArgs, State) ->
        1:?T_UINT8 % type == 'unlogged'
       ,(length(ListOfArgs)):?T_UINT16
      >>
-    | wire_batch(Id, ListOfArgs, RequestMetadata)
+    | wire_batch(Id, ListOfArgs, Consistency, RequestMetadata)
    ]
   ,ok = send_frame(State1, ?OP_BATCH, Query)
   ,{ok, State1}
 .
-wire_batch(_Id, [], _RequestMetadata) ->
+wire_batch(_Id, [], Consistency, _RequestMetadata) ->
   [<<
-    1:?T_UINT16 % consistency one
+    Consistency:?T_UINT16
   >>]
 ;
-wire_batch(Id, [Args | ListOfArgs], RequestMetadata) ->
+wire_batch(Id, [Args | ListOfArgs], Consistency, RequestMetadata) ->
   [
      <<
        1:?T_UINT8 % kind == 'prepared query'
@@ -240,7 +234,7 @@ wire_batch(Id, [Args | ListOfArgs], RequestMetadata) ->
       ,Id/binary
      >>
     ,wire_values(Args, RequestMetadata)
-    | wire_batch(Id, ListOfArgs, RequestMetadata)
+    | wire_batch(Id, ListOfArgs, Consistency, RequestMetadata)
   ]
 .
 

@@ -7,6 +7,9 @@
 -behaviour(application).
 -behaviour(gen_server).
 
+%% Includes
+-include("ecql.hrl").
+
 -record(state, {clients, counter = 0, settings}).
 
 -define(DUPLICATE_TABLE, 9216).
@@ -34,9 +37,12 @@
   ,config/2
   ,execute/1
   ,execute/2
+  ,execute/3
   ,execute_async/1
   ,execute_async/2
+  ,execute_async/3
   ,execute_batch/2
+  ,execute_batch/3
   ,eval/1
   ,eval_all/1
   ,quote/1
@@ -233,23 +239,32 @@ select(Cql, Args) ->
 
 %%------------------------------------------------------------------------------
 execute(Cql) ->
-  execute(Cql, [])
+  execute(Cql, [], ?CL_ONE)
 .
 execute(Cql, Args) ->
-  accept_ok(ecql_stream:query(anystream(), Cql, Args))
+  execute(Cql, Args, ?CL_ONE)
+.
+execute(Cql, Args, Consistency) ->
+  accept_ok(ecql_stream:query(anystream(), Cql, Args, Consistency))
 .
 
 %%------------------------------------------------------------------------------
 execute_async(Cql) ->
-  execute_async(Cql, [])
+  execute_async(Cql, [], ?CL_ONE)
 .
 execute_async(Cql, Args) ->
-  accept_ok(ecql_stream:query_async(anystream(), Cql, Args))
+  execute_async(Cql, Args, ?CL_ONE)
+.
+execute_async(Cql, Args, Consistency) ->
+  accept_ok(ecql_stream:query_async(anystream(), Cql, Args, Consistency))
 .
 
 %%------------------------------------------------------------------------------
 execute_batch(Cql, ListOfArgs) ->
-  accept_ok(ecql_stream:query_batch(anystream(), Cql, ListOfArgs))
+  execute_batch(Cql, ListOfArgs, ?CL_ONE)
+.
+execute_batch(Cql, ListOfArgs, Consistency) ->
+  accept_ok(ecql_stream:query_batch(anystream(), Cql, ListOfArgs, Consistency))
 .
 
 %%------------------------------------------------------------------------------
