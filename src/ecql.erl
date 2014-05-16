@@ -54,7 +54,7 @@
   ,select_column/2
   ,select_column/3
   ,term_to_bin/1
-  ,create_once/1
+  ,create_index/3
   ,create_table/2
   ,create_table/3
   ,indexof/2
@@ -101,7 +101,7 @@ init_keyspace(Configuration) ->
   ,Stream = ecql_connection:get_stream(Connection)
   ,Strategy = proplists:get_value(replication_strategy, Configuration, "SimpleStrategy")
   ,CQL = [
-     "CREATE KEYSPACE "
+     "CREATE KEYSPACE IF NOT EXISTS"
     ,Keyspace
     ," with REPLICATION = {'class':'"
     ,Strategy
@@ -109,7 +109,7 @@ init_keyspace(Configuration) ->
     ,data_centers(Strategy, Factor)
     ,"} "
    ]
-  ,accept_duplicate(ecql_stream:query(Stream, CQL))
+  ,accept_ok(ecql_stream:query(Stream, CQL))
   ,ok = ecql_connection:stop(Connection)
 .
 data_centers("SimpleStrategy", Factor) ->
@@ -268,37 +268,29 @@ execute_batch(Cql, ListOfArgs, Consistency) ->
 .
 
 %%------------------------------------------------------------------------------
-create_once(Cql) ->
-  accept_duplicate(ecql_stream:query(anystream(), Cql))
+create_index(Indexname, Tablename, Columnname) ->
+  accept_ok(ecql_stream:query(anystream() ,[
+     "CREATE INDEX IF NOT EXISTS ", Indexname, " ON ", Tablename
+    ," (", Columnname, ");"
+  ]))
 .
 
 %%------------------------------------------------------------------------------
-create_table(Tablename, Body) ->
-  create_once([
-     "CREATE TABLE ", Tablename, " ( ", Body, " ) WITH "
+create_table(Tablename, TableDef) ->
+  accept_ok(ecql_stream:query(anystream() ,[
+     "CREATE TABLE IF NOT EXISTS", Tablename, " ( ", TableDef, " ) WITH "
     ,?COMPACTION
     ,";"
-  ])
+  ]))
 .
 
 %%------------------------------------------------------------------------------
-create_table(Tablename, Body, Comment) ->
-  create_once([
-     "CREATE TABLE ", Tablename, " ( ", Body, " ) WITH "
+create_table(Tablename, TableDef, Comment) ->
+  accept_ok(ecql_stream:query(anystream() ,[
+     "CREATE TABLE IF NOT EXISTS", Tablename, " ( ", TableDef, " ) WITH "
     ,?COMPACTION
     ," AND comment='", Comment, "';"
-  ])
-.
-
-%%------------------------------------------------------------------------------
-accept_duplicate({error, ?DUPLICATE_TABLE, _Message}) ->
-  ok
-;
-accept_duplicate({error, ?DUPLICATE_INDEX, _Message}) ->
-  ok
-;
-accept_duplicate(Other) ->
-  accept_ok(Other)
+  ]))
 .
 
 %%------------------------------------------------------------------------------

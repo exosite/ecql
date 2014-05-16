@@ -15,12 +15,12 @@
 % ecql_perf:test(2).
 
 init(1) ->
-   Table = "CREATE TABLE record_name (a int PRIMARY KEY, b int) WITH caching = 'none';"
-  ,ecql:create_once(Table)
+   Table = "CREATE TABLE IF NOT EXISTS record_name (a int PRIMARY KEY, b int) WITH caching = 'none';"
+  ,ecql_stream:query(Table)
 ;
 
 init(2) ->
-   Table2 = "CREATE TABLE record_name2 (a int PRIMARY KEY, b int) WITH
+   Table2 = "CREATE TABLE IF NOT EXISTS record_name2 (a int PRIMARY KEY, b int) WITH
     bloom_filter_fp_chance=0.010000 AND
     caching='KEYS_ONLY' AND
     comment='' AND
@@ -35,7 +35,7 @@ init(2) ->
     compaction={'class': 'LeveledCompactionStrategy'} AND
     memtable_flush_period_in_ms=3600000 AND
     compression={'sstable_compression': 'LZ4Compressor'};"
-  ,ecql:create_once(Table2)
+  ,ecql:execute(Table2)
 .
 
 test(1) ->

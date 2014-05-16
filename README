@@ -42,8 +42,8 @@ supervisor:delete_child(opprocessor_sup,opprocessor_scripting_sup).
 % notebook: 23 sec (no compression)
 
 
-Table = "CREATE TABLE record_name (a int PRIMARY KEY, b int) WITH caching = 'none';".
-cassandra:create_once(Table).
+Table = "CREATE TABLE IF NOT EXISTS record_name (a int PRIMARY KEY, b int) WITH caching = 'none';".
+ecql:execute(Table).
 
 f(Table2).
 Table2 = "CREATE TABLE record_name2 (a int PRIMARY KEY, b int) WITH
@@ -61,7 +61,7 @@ Table2 = "CREATE TABLE record_name2 (a int PRIMARY KEY, b int) WITH
     compaction={'class': 'LeveledCompactionStrategy'} AND
     memtable_flush_period_in_ms=3600000 AND
     compression={'sstable_compression': 'LZ4Compressor'};".
-cassandra:create_once(Table2).
+ecql:execute(Table2).
 
 % compaction={'size_limit_in_mb': '800', 'class': 'MemoryOnlyStrategy'} AND
 % compaction={'class': 'SizeTieredCompactionStrategy'} AND
