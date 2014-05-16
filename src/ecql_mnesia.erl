@@ -5,6 +5,8 @@
 %%==============================================================================
 -module(ecql_mnesia).
 
+-include("ecql.hrl").
+
 %% Mnesia APIs
 -export([
    add_table_copy/3
@@ -163,7 +165,7 @@ write([RecordName | RecordValues]) when is_atom(RecordName) ->
     ,") VALUES (?"
     ,string:copies(",?", length(RecordValues) - 1)
     ,");"
-  ], [ecql:term_to_bin(Value) || Value <- RecordValues])
+  ], [ecql:term_to_bin(Value) || Value <- RecordValues] ,?CL_LOCAL_QUORUM)
 .
 
 %%------------------------------------------------------------------------------
