@@ -101,7 +101,7 @@ init_keyspace(Configuration) ->
   ,Stream = ecql_connection:get_stream(Connection)
   ,Strategy = proplists:get_value(replication_strategy, Configuration, "SimpleStrategy")
   ,CQL = [
-     "CREATE KEYSPACE IF NOT EXISTS"
+     "CREATE KEYSPACE IF NOT EXISTS "
     ,Keyspace
     ," with REPLICATION = {'class':'"
     ,Strategy
@@ -278,7 +278,7 @@ create_index(Indexname, Tablename, Columnname) ->
 %%------------------------------------------------------------------------------
 create_table(Tablename, TableDef) ->
   accept_ok(ecql_stream:query(anystream() ,[
-     "CREATE TABLE IF NOT EXISTS", Tablename, " ( ", TableDef, " ) WITH "
+     "CREATE TABLE IF NOT EXISTS ", Tablename, " ( ", TableDef, " ) WITH "
     ,?COMPACTION
     ,";"
   ]))
@@ -287,7 +287,7 @@ create_table(Tablename, TableDef) ->
 %%------------------------------------------------------------------------------
 create_table(Tablename, TableDef, Comment) ->
   accept_ok(ecql_stream:query(anystream() ,[
-     "CREATE TABLE IF NOT EXISTS", Tablename, " ( ", TableDef, " ) WITH "
+     "CREATE TABLE IF NOT EXISTS ", Tablename, " ( ", TableDef, " ) WITH "
     ,?COMPACTION
     ," AND comment='", Comment, "';"
   ]))

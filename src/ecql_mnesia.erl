@@ -358,7 +358,7 @@ create_table(Name ,Def) ->
          fun(IndexName) ->
            Index = ecql:indexof(IndexName, Fields)
           ,ok = ecql:create_index(
-             [map_recordname(Name), $_, map_recordname(IndexName)]
+             map_recordname(Name) ++ "_" ++ map_recordname(IndexName)
             ,map_recordname(Name)
             ,map_fieldindex(Index)
           )
