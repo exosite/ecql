@@ -29,14 +29,18 @@
 %% Defines
 -define(TIMEOUT, infinity).
 -define(MAX_PENDING, 100).
+-define(ENABLED_PAGING, #paging{flag = 4, page_state = <<>>}).
+-define(DISABLED_PAGING, #paging{flag = 0, page_state = <<>>}).
+-define(RESULT_PAGE_SIZE, 100).
 
 %% Includes
 -include("ecql.hrl").
 
 %% Records
 -record(state, {connection, sender, stream, async_pending = 0}).
--record(metadata, {flags, columnspecs}).
+-record(metadata, {flags, columnspecs, paging_state}).
 -record(preparedstatement, {id, metadata, result_metadata}).
+-record(paging, {flag, page_state}).
 
 %%-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 %% Public API
@@ -93,13 +97,13 @@ stop(Stream) ->
 %%------------------------------------------------------------------------------
 handle_call({query, Cql, [], Consistency}, _From, State) ->
    State1 = wait_async(State)
-  ,execute_query(Cql, [], Consistency, State1)
-  ,{reply, recv_frame(), State1}
+  ,{ok, Result} = do_query(Cql, [], Consistency, State1, ?ENABLED_PAGING, [])
+  ,{reply, Result, State1}
 ;
 handle_call({query, Cql, Args, Consistency}, _From, State) ->
    State1 = wait_async(State)
-  ,{ok, Metadata, State2} = execute_query(Cql, Args, Consistency, State1)
-  ,{reply, recv_frame(Metadata), State2}
+  ,{ok, Result, State2} = do_query(Cql, Args, Consistency, State1, ?ENABLED_PAGING, [])
+  ,{reply, Result, State2}
 ;
 handle_call({query_batch, Cql, ListOfArgs, Consistency}, _From, State) ->
    State1 = wait_async(State)
@@ -112,11 +116,11 @@ handle_call(stop, _From, State) ->
 
 %%------------------------------------------------------------------------------
 handle_cast({query, Cql, [], Consistency}, State = #state{async_pending = Pending}) ->
-   execute_query(Cql, [], Consistency, State)
+   execute_query(Cql, [], Consistency, State, ?DISABLED_PAGING)
   ,{noreply, State#state{async_pending = Pending + 1}}
 ;
 handle_cast({query, Cql, Args, Consistency}, State) ->
-   {ok, _, State1 = #state{async_pending = Pending}} = execute_query(Cql, Args, Consistency, State)
+   {ok, _, State1 = #state{async_pending = Pending}} = execute_query(Cql, Args, Consistency, State, ?DISABLED_PAGING)
   ,{noreply, State1#state{async_pending = Pending + 1}}
 ;
 handle_cast({query_batch, Cql, ListOfArgs, Consistency}, State) ->
@@ -179,19 +183,84 @@ do_log(Error) ->
 
 %%------------------------------------------------------------------------------
 % Executes a single plain query
-execute_query(Cql, [], Consistency, State) ->
+%%    do_query(Cql, [], Quorum, State, Paging, Rows) ->
+%%      {ok, Result} | {ok, Result, State2}
+%%
+%%  Description:
+%%    Send one or multiple queries to Cassandra to retrieve the Result of the
+%%    given Cql.
+%%------------------------------------------------------------------------------
+do_query(Cql, [], Consistency, State, Paging1, Rows) ->
+   execute_query(Cql, [], Consistency, State, Paging1)
+  ,RecvResult = recv_frame()
+  ,case redo_query(RecvResult, Paging1, Rows) of
+    {no, Result} ->
+      {ok, Result}
+    ;
+    {yes, Paging2, RecvR} ->
+      do_query(Cql, [], Consistency, State, Paging2, lists:merge(Rows, RecvR))
+  end
+;
+do_query(Cql, Args, Consistency, State1, Paging1, Rows) ->
+	{ok, Metadata, State2} = execute_query(Cql, Args, Consistency, State1, Paging1)
+  ,RecvResult = recv_frame(Metadata)
+  ,case redo_query(RecvResult, Paging1, Rows) of
+    {no, Result} ->
+      {ok, Result, State2}
+    ;
+    {yes, Paging2, RecvR} ->
+      do_query(Cql, Args, Consistency, State1, Paging2, lists:merge(Rows, RecvR))
+  end
+.
+
+%%------------------------------------------------------------------------------
+%%  Function:
+%%    redo_query(Result) -> {no, Result} | yes
+%%
+%%  Description:
+%%    According to the given Result, check if it is necessary to send another
+%%    query, i.e., we received paging_state from Cassandra where it would be
+%%    used in the next query.
+%%------------------------------------------------------------------------------
+redo_query(ok, _, _) ->
+  {no, ok}
+;
+redo_query(Result, Paging1, AccRows) ->
+  case erlang:element(1, Result) of
+	 <<>> ->
+       {<<>>, {Keys, Rows}} = Result
+      ,{no, {Keys, lists:merge(AccRows, Rows)}}
+    ;
+    ok ->
+      {no, Result}
+    ;
+    error ->
+      {no, Result}
+    ;
+    _ ->
+       {RecvPGS, {_RecvK, RecvR}} = Result
+      ,Paging2 = Paging1#paging{page_state = RecvPGS}
+		,{yes, Paging2, RecvR}
+  end
+.
+
+%%------------------------------------------------------------------------------
+% Executes a single plain query
+execute_query(Cql, [], Consistency, State, Paging) ->
   Query = [
      wire_longstring(Cql)
     ,<<
        Consistency:?T_UINT16
-      ,0:?T_UINT8 % flag
+      ,(get_flag([], Paging)):?T_UINT8
      >>
+	 ,get_pg_size(Paging)
+    ,Paging#paging.page_state
    ]
   ,ok = send_frame(State, ?OP_QUERY, Query)
   ,ok
 ;
 % Lazily prepares a query that has args and then executes it
-execute_query(Cql, Args, Consistency, State) ->
+execute_query(Cql, Args, Consistency, State, Paging) ->
    {StatementRec, State1} = prepare_statement(Cql, State)
   ,#preparedstatement{id = Id, result_metadata = Metadata, metadata = RequestMetadata} = StatementRec
   ,Query = [
@@ -199,9 +268,11 @@ execute_query(Cql, Args, Consistency, State) ->
        (size(Id)):?T_UINT16
       ,Id/binary
       ,Consistency:?T_UINT16
-      ,3:?T_UINT8 % flag skip_metadata[2] + values[1]
+      ,(get_flag(Args, Paging)):?T_UINT8
      >>
     ,wire_values(Args, RequestMetadata)
+	 ,get_pg_size(Paging)
+    ,Paging#paging.page_state
    ]
   ,ok = send_frame(State1, ?OP_EXECUTE, Query)
   ,{ok, Metadata, State1}
@@ -236,6 +307,56 @@ wire_batch(Id, [Args | ListOfArgs], Consistency, RequestMetadata) ->
     ,wire_values(Args, RequestMetadata)
     | wire_batch(Id, ListOfArgs, Consistency, RequestMetadata)
   ]
+.
+
+get_pg_size(#paging{flag = Flag}) ->
+  if (Flag band 4) == 4 ->
+    <<?RESULT_PAGE_SIZE:32>>
+  ;
+  true ->
+    <<>>
+  end
+.
+
+%%------------------------------------------------------------------------------
+%%  Function:
+%%    get_flag(Args, Paging) -> flag
+%%
+%%  Description:
+%%    Evaluate what value the flag would be
+%%
+%%    1: Values, 2: skip_metadata, 4: page_size, 8: with_paging_state,
+%%    10: serial_consistency
+%%------------------------------------------------------------------------------
+get_flag([], #paging{flag = Flag, page_state = PGState}) ->
+  get_paging_flag(Flag, PGState)
+;
+get_flag(_Args, #paging{flag = Flag, page_state = PGState}) ->
+  (3 + get_paging_flag(Flag, PGState))
+.
+
+%%------------------------------------------------------------------------------
+%%  Function:
+%%    get_paging_flag(Flag, PGState) -> paging flag number
+%%
+%%  Description:
+%%    Evalute the paging flag number.
+%%------------------------------------------------------------------------------
+get_paging_flag(Flag, PGState) ->
+   CheckFlag = Flag band 4
+  ,case {CheckFlag, PGState} of
+    {0, <<>>} ->
+      0
+    ;
+    {0, _S} ->
+      8
+    ;
+    {4, <<>>} ->
+      4
+    ;
+    {4, _S} ->
+      12
+  end
 .
 
 %%------------------------------------------------------------------------------
@@ -298,12 +419,12 @@ recv_frame(Metadata) ->
 
 %%------------------------------------------------------------------------------
 handle_response(?OP_RESULT, <<?RT_ROWS, Body/binary>>, undefined) ->
-   {#metadata{columnspecs = ColSpecs}, Rest} = read_metadata(Body)
-  ,rows(Rest, ColSpecs)
+   {#metadata{columnspecs = ColSpecs, paging_state = PageState}, Rest} = read_metadata(Body)
+  ,{PageState, rows(Rest, ColSpecs)}
 ;
 handle_response(?OP_RESULT, <<?RT_ROWS, Body/binary>>, #metadata{columnspecs = ColSpecs}) ->
-   {_, Rest} = read_metadata(Body)
-  ,rows(Rest, ColSpecs)
+   {#metadata{paging_state = PageState}, Rest} = read_metadata(Body)
+  ,{PageState, rows(Rest, ColSpecs)}
 ;
 handle_response(OpCode, Body, _) ->
   handle_response(OpCode, Body)
@@ -392,27 +513,56 @@ read_colspec(<<Len:?T_INT16, Name:Len/binary, Type:?T_INT16, Rest/binary>>) when
 .
 
 %%------------------------------------------------------------------------------
+read_metadata(<<Flag0:?T_INT32, ColCount:?T_INT32, Body0/binary>>) ->
+   {Flag1, PageState, Body1} = retrieve_pagestate(<<Flag0:32>>, Body0)
+  ,read_metadata(Flag1, PageState, ColCount, Body1)
+.
 % table spec per column
-read_metadata(<<0:?T_INT32, ColCount:?T_INT32, Body/binary>>) ->
+% table spec per column
+read_metadata(<<0:?T_INT32>>, PageState, ColCount, Body) ->
    {ColSpecs, Rest} = readn(ColCount, Body, fun(ColSpecBin) ->
      {_TableSpec, ColSpecBinRest0} = read_tablespec(ColSpecBin)
     ,read_colspec(ColSpecBinRest0)
    end)
-  ,{#metadata{flags = 0, columnspecs = format_specs(ColSpecs)}, Rest}
+  ,{#metadata{flags = 0, columnspecs = format_specs(ColSpecs)
+    ,paging_state = PageState}, Rest}
 ;
 % global table spec only once
-read_metadata(<<1:?T_INT32, ColCount:?T_INT32, Body/binary>>) ->
+read_metadata(<<1:?T_INT32>>, PageState, ColCount, Body) ->
    {_TableSpec, Rest0} = read_tablespec(Body)
   ,{ColSpecs, Rest1} = readn(ColCount, Rest0, fun read_colspec/1)
-  ,{#metadata{flags = 1, columnspecs = format_specs(ColSpecs)}, Rest1}
+  ,{#metadata{flags = 1, columnspecs = format_specs(ColSpecs)
+    ,paging_state = PageState}, Rest1}
 ;
 % no metadata
-read_metadata(<<4:?T_INT32, _ColCount:?T_INT32, Body/binary>>) ->
-  {#metadata{flags = 4}, Body}
+read_metadata(<<4:?T_INT32>>, PageState, _ColCount, Body) ->
+  {#metadata{flags = 4, paging_state = PageState}, Body}
 ;
 % no metadata + global table spec is actually the same
-read_metadata(<<5:?T_INT32, _ColCount:?T_INT32, Body/binary>>) ->
-  {#metadata{flags = 5}, Body}
+read_metadata(<<5:?T_INT32>>, PageState, _ColCount, Body) ->
+  {#metadata{flags = 5, paging_state = PageState}, Body}
+.
+
+%%------------------------------------------------------------------------------
+%%  Function:
+%%    retrieve_pagestate(Flag, Body) -> {NewFlag, PageState, NewBody}
+%%
+%%  Description:
+%%    Check if the flag of Has_more_page is set.  If it is set, PageState will
+%%    include the value of paging_state else PageState is <<>>.
+%%    If Has_more_page is set, Flag and Body will also be updated (remove
+%%    Has_more_page from Flag and remove paging_state from Body.)
+%%------------------------------------------------------------------------------
+retrieve_pagestate(<<Front:30, 1:1, Global:1>>, Body0) ->
+   {PageState, Body1} = retrieve_pagestate(Body0)
+  ,{<<Front:30, 0:1, Global:1>>, PageState, Body1}
+;
+retrieve_pagestate(<<Front:30, 0:1, Global:1>>, Body) ->
+  {<<Front:30, 0:1, Global:1>>, <<>>, Body}
+.
+
+retrieve_pagestate(<<N:?T_INT32, PageState:N/binary, Body/binary>>) ->
+  {<<N:?T_INT32, PageState/binary>>, Body}
 .
 
 %%------------------------------------------------------------------------------
