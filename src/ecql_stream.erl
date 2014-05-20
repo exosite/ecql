@@ -31,7 +31,7 @@
 -define(MAX_PENDING, 100).
 -define(ENABLED_PAGING, #paging{flag = 4, page_state = <<>>}).
 -define(DISABLED_PAGING, #paging{flag = 0, page_state = <<>>}).
--define(RESULT_PAGE_SIZE, 100).
+-define(RESULT_PAGE_SIZE, 1000).
 
 %% Includes
 -include("ecql.hrl").
@@ -182,7 +182,6 @@ do_log(Error) ->
 .
 
 %%------------------------------------------------------------------------------
-% Executes a single plain query
 %%    do_query(Cql, [], Quorum, State, Paging, Rows) ->
 %%      {ok, Result} | {ok, Result, State2}
 %%
@@ -198,18 +197,18 @@ do_query(Cql, [], Consistency, State, Paging1, Rows) ->
       {ok, Result}
     ;
     {yes, Paging2, RecvR} ->
-      do_query(Cql, [], Consistency, State, Paging2, lists:merge(Rows, RecvR))
+      do_query(Cql, [], Consistency, State, Paging2, Rows ++ RecvR)
   end
 ;
 do_query(Cql, Args, Consistency, State1, Paging1, Rows) ->
-	{ok, Metadata, State2} = execute_query(Cql, Args, Consistency, State1, Paging1)
+   {ok, Metadata, State2} = execute_query(Cql, Args, Consistency, State1, Paging1)
   ,RecvResult = recv_frame(Metadata)
   ,case redo_query(RecvResult, Paging1, Rows) of
     {no, Result} ->
       {ok, Result, State2}
     ;
     {yes, Paging2, RecvR} ->
-      do_query(Cql, Args, Consistency, State1, Paging2, lists:merge(Rows, RecvR))
+      do_query(Cql, Args, Consistency, State1, Paging2, Rows ++ RecvR)
   end
 .
 
@@ -227,9 +226,9 @@ redo_query(ok, _, _) ->
 ;
 redo_query(Result, Paging1, AccRows) ->
   case erlang:element(1, Result) of
-	 <<>> ->
+    <<>> ->
        {<<>>, {Keys, Rows}} = Result
-      ,{no, {Keys, lists:merge(AccRows, Rows)}}
+      ,{no, {Keys, AccRows ++ Rows}}
     ;
     ok ->
       {no, Result}
@@ -240,7 +239,7 @@ redo_query(Result, Paging1, AccRows) ->
     _ ->
        {RecvPGS, {_RecvK, RecvR}} = Result
       ,Paging2 = Paging1#paging{page_state = RecvPGS}
-		,{yes, Paging2, RecvR}
+      ,{yes, Paging2, RecvR}
   end
 .
 
@@ -253,7 +252,7 @@ execute_query(Cql, [], Consistency, State, Paging) ->
        Consistency:?T_UINT16
       ,(get_flag([], Paging)):?T_UINT8
      >>
-	 ,get_pg_size(Paging)
+    ,get_page_size(Paging)
     ,Paging#paging.page_state
    ]
   ,ok = send_frame(State, ?OP_QUERY, Query)
@@ -271,7 +270,7 @@ execute_query(Cql, Args, Consistency, State, Paging) ->
       ,(get_flag(Args, Paging)):?T_UINT8
      >>
     ,wire_values(Args, RequestMetadata)
-	 ,get_pg_size(Paging)
+    ,get_page_size(Paging)
     ,Paging#paging.page_state
    ]
   ,ok = send_frame(State1, ?OP_EXECUTE, Query)
@@ -309,7 +308,7 @@ wire_batch(Id, [Args | ListOfArgs], Consistency, RequestMetadata) ->
   ]
 .
 
-get_pg_size(#paging{flag = Flag}) ->
+get_page_size(#paging{flag = Flag}) ->
   if (Flag band 4) == 4 ->
     <<?RESULT_PAGE_SIZE:32>>
   ;
@@ -517,7 +516,6 @@ read_metadata(<<Flag0:?T_INT32, ColCount:?T_INT32, Body0/binary>>) ->
    {Flag1, PageState, Body1} = retrieve_pagestate(<<Flag0:32>>, Body0)
   ,read_metadata(Flag1, PageState, ColCount, Body1)
 .
-% table spec per column
 % table spec per column
 read_metadata(<<0:?T_INT32>>, PageState, ColCount, Body) ->
    {ColSpecs, Rest} = readn(ColCount, Body, fun(ColSpecBin) ->
