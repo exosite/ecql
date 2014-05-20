@@ -67,12 +67,11 @@ ecql:execute(Table2).
 % compaction={'class': 'SizeTieredCompactionStrategy'} AND
 
 
-
 timer:tc(fun() ->
     lists:foreach(
       fun(Each) ->
-          cassandra:execute_async("INSERT INTO record_name (a, b) VALUES(?, ?)", [Each, Each])
-         ,Each = cassandra:select_value("SELECT b FROM record_name WHERE a = ?", [Each])
+          ecql:execute_async("INSERT INTO record_name (a, b) VALUES(?, ?)", [Each, Each])
+         ,Each = ecql:select_value("SELECT b FROM record_name WHERE a = ?", [Each])
       end
      ,lists:seq(1, 50000)
     )
@@ -81,10 +80,21 @@ timer:tc(fun() ->
 timer:tc(fun() ->
     lists:foreach(
       fun(Each) ->
-          cassandra:execute_async("INSERT INTO record_name2 (a, b) VALUES(?, ?)", [Each, Each])
-         ,Each = cassandra:select_value("SELECT b FROM record_name2 WHERE a = ?", [Each])
+          ecql:execute_async("INSERT INTO record_name2 (a, b) VALUES(?, ?)", [Each, Each])
+         ,Each = ecql:select_value("SELECT b FROM record_name2 WHERE a = ?", [Each])
       end
      ,lists:seq(1, 50000)
     )
   end).
+
+
+Table = "CREATE TABLE IF NOT EXISTS record_name (a int, b int, c int, PRIMARY KEY (a, b)) WITH caching = 'none';".
+ecql:execute(Table).
+lists:foreach(
+  fun(Each) ->
+      ecql:execute_async("INSERT INTO record_name (a, b, c) VALUES(1, ?, ?)", [Each ,Each])
+  end
+ ,lists:seq(1000, 1100)
+).
+ecql:select("SELECT b FROM record_name WHERE a = 1 ORDER BY b DESC").
 
