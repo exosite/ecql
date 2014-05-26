@@ -148,12 +148,28 @@ auth({#frame{opcode=?OP_READY}, _}, _User, _Pass) ->
 waitforframe() ->
   waitforframe(<<>>)
 .
-waitforframe(<<?VS_RESPONSE, 0, StreamId, OpCode, Length:?T_UINT32, Body:Length/binary, Rest/binary>>) ->
-  {#frame{stream=StreamId, opcode=OpCode, body=Body}, Rest}
+waitforframe(<<?VS_RESPONSE, 0, StreamId, OpCode, Length:?T_UINT32, FrameBody:Length/binary, Rest/binary>>) ->
+  {#frame{stream=StreamId, opcode=OpCode, body=FrameBody}, Rest}
 ;
-waitforframe(Sofar) ->
+waitforframe(<<?VS_RESPONSE, 0, StreamId, OpCode, Length:?T_UINT32, PartialFrameBody/binary>>) ->
+   <<FrameBody:Length/binary, Rest/binary>> = waitforframe(Length, [PartialFrameBody])
+  ,{#frame{stream=StreamId, opcode=OpCode, body=FrameBody}, Rest}
+;
+waitforframe(IncompleteHeader) ->
   receive {tcp, _Socket, Data} ->
-    waitforframe(<<Sofar/binary, Data/binary>>)
+    waitforframe(<<IncompleteHeader/binary, Data/binary>>)
+  end
+.
+waitforframe(Length, PartialFrameBody) ->
+  case (iolist_size(PartialFrameBody) < Length) of
+    true ->
+      receive {tcp, _Socket, Data} ->
+        waitforframe(Length, [Data | PartialFrameBody])
+      end
+    ;
+    false ->
+      iolist_to_binary(PartialFrameBody)
+    %~
   end
 .
 
