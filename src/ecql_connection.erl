@@ -168,7 +168,7 @@ waitforframe(Length, PartialFrameBody) ->
       end
     ;
     false ->
-      iolist_to_binary(PartialFrameBody)
+      iolist_to_binary(lists:reverse(PartialFrameBody))
     %~
   end
 .
