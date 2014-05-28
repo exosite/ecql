@@ -71,7 +71,12 @@ query_async(Id, Cql, Args, Consistency) ->
 query_batch(_, _, [], _) ->
   ok
 ;
-query_batch(Id, Cql, ListOfArgs ,Consistency) ->
+query_batch(Id, Cql, ListOfArgs, Consistency) when length(ListOfArgs) > 65535 ->
+   {ListOfArgs1, ListOfArgs2} = lists:split(65535, ListOfArgs)
+  ,query_batch(Id, Cql, ListOfArgs1, Consistency)
+  ,query_batch(Id, Cql, ListOfArgs2, Consistency)
+;
+query_batch(Id, Cql, ListOfArgs, Consistency) ->
   gen_server:call(Id, {query_batch, Cql, ListOfArgs, Consistency}, ?TIMEOUT)
 .
 
