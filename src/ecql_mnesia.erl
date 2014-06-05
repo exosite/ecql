@@ -230,11 +230,17 @@ delete(RecordName, KeyValue, _Lock) ->
 .
 
 %%------------------------------------------------------------------------------
+dirty_delete({RecordName, KeyValue}) ->
+  delete({RecordName, KeyValue})
+.
 delete({RecordName, KeyValue}) when is_atom(RecordName) ->
   delete_object(read(RecordName, KeyValue))
 .
 
 %%------------------------------------------------------------------------------
+dirty_delete_object(Records) ->
+  delete_object(Records)
+.
 delete_object(Records) when is_list(Records) ->
    lists:foreach(fun delete_object/1, Records)
   ,ok
