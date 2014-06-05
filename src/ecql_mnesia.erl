@@ -24,6 +24,7 @@
   ,dirty_index_read/3
   ,dirty_match_object/1, dirty_match_object/2
   ,dirty_read/2, dirty_read/3
+  ,dirty_select/1, dirty_select/2, dirty_select/4
   ,dirty_update_counter/3
   ,dirty_write/1
   ,first/1
@@ -429,6 +430,9 @@ dirty_update_counter(RecordName, KeyValue, Increment) when is_atom(RecordName) -
 .
 
 %%------------------------------------------------------------------------------
+dirty_select({continuation ,[] ,_NObjects}) ->
+  select({continuation ,[] ,_NObjects})
+.
 select({continuation ,[] ,_NObjects}) ->
   '$end_of_table'
 ;
@@ -441,6 +445,9 @@ select(_Cont) ->
 .
 
 %%------------------------------------------------------------------------------
+dirty_select(RecordName ,MatchSpec) ->
+  select(RecordName ,MatchSpec)
+.
 select(RecordName ,MatchSpec) when is_atom(RecordName) ->
   foldr(
      fun(Record, Acc) ->
@@ -462,6 +469,9 @@ select(RecordName ,MatchSpec) when is_atom(RecordName) ->
 .
 
 %%------------------------------------------------------------------------------
+dirty_select(RecordName ,MatchSpec ,NObjects ,_Lock) ->
+  select(RecordName ,MatchSpec ,NObjects ,_Lock)
+.
 select(RecordName ,MatchSpec ,NObjects ,_Lock) when is_atom(RecordName) ->
   select({continuation, select(RecordName, MatchSpec), NObjects})
 .
