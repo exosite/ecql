@@ -18,6 +18,8 @@
   ,delete/1, delete/3
   ,delete_object/1
   ,dirty_all_keys/1
+  ,dirty_delete/1, dirty_delete/3
+  ,dirty_delete_object/1
   ,dirty_index_match_object/3, dirty_index_match_object/2
   ,dirty_index_read/3
   ,dirty_match_object/1, dirty_match_object/2
@@ -225,6 +227,9 @@ match_object([RecordName | RecordValues]) when is_atom(RecordName) ->
 .
 
 %%------------------------------------------------------------------------------
+dirty_delete(RecordName, KeyValue, Lock) ->
+  delete(RecordName ,KeyValue ,Lock)
+.
 delete(RecordName, KeyValue, _Lock) ->
   delete({RecordName, KeyValue})
 .
