@@ -153,12 +153,13 @@ dirty_write(Record)  ->
 .
 write(Record) when is_tuple(Record) ->
    [RecordName | RecordValues] = RecordList = tuple_to_list(Record)
+  ,Result = write(RecordList)
   ,ecql_cache:dirty({RecordName, hd(RecordValues)})
   ,[
     ecql_cache:dirty({RecordName, element(I, Record), I})
     || I <- lists:seq(3, length(RecordValues)+1), is_binary(element(I, Record))
    ]
-  ,write(RecordList)
+  ,Result
 ;
 write([RecordName | RecordValues]) when is_atom(RecordName) ->
   ecql:execute([
@@ -258,14 +259,15 @@ delete_object(Record) when is_tuple(Record) ->
   % Correct Impl?
   % Should delete all object according to the pattern or only based on prim key?
    [RecordName | RecordValues] = tuple_to_list(Record)
+  ,{RecordName, Table} = lists:keyfind(RecordName, 1, get_tables())
+  ,{type, Type} = lists:keyfind(type, 1, Table)
+  ,Result = do_delete_object(Type, RecordName, RecordValues)
   ,ecql_cache:dirty({RecordName, hd(RecordValues)})
   ,[
     ecql_cache:dirty({RecordName, element(I, Record), I})
     || I <- lists:seq(3, length(RecordValues)+1), is_binary(element(I, Record))
    ]
-  ,{RecordName, Table} = lists:keyfind(RecordName, 1, get_tables())
-  ,{type, Type} = lists:keyfind(type, 1, Table)
-  ,do_delete_object(Type, RecordName, RecordValues)
+  ,Result
 .
 do_delete_object(set, RecordName, RecordValues) ->
    ecql:execute(
