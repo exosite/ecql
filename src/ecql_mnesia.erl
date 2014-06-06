@@ -22,7 +22,7 @@
   ,dirty_delete_object/1
   ,dirty_index_match_object/3, dirty_index_match_object/2
   ,dirty_index_read/3
-  ,dirty_match_object/1, dirty_match_object/2
+  ,dirty_match_object/1, dirty_match_object/2, dirty_match_object/3
   ,dirty_read/2, dirty_read/3
   ,dirty_select/1, dirty_select/2, dirty_select/4
   ,dirty_update_counter/3
@@ -188,6 +188,9 @@ index_match_object(RecordPattern, _KeyIndex) ->
 .
 
 %%------------------------------------------------------------------------------
+dirty_match_object(_RecordName, RecordPattern, _LockKind) ->
+  match_object(_RecordName, RecordPattern, _LockKind)
+.
 match_object(_RecordName, RecordPattern, _LockKind) ->
   match_object(RecordPattern)
 .
