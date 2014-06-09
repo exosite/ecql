@@ -442,7 +442,7 @@ handle_response(?OP_ERROR, <<?ER_UNPREPARED:?T_INT32, Len:?T_UINT16, Message:Len
   ,error_logger:error_msg("query failed: {error, ~p, ~s ,~s}~n", [?ER_UNPREPARED, Message ,SId])
   ,{error, ?ER_UNPREPARED, SMessage}
 ;
-handle_response(?OP_ERROR, <<Code:?T_INT32, _Len:?T_UINT16, Message/binary>>) ->
+handle_response(?OP_ERROR, <<Code:?T_INT32, Len:?T_UINT16, Message:Len/binary, _Rest/binary>>) ->
   {error, Code, binary_to_list(Message)}
 ;
 handle_response(?OP_RESULT, <<?RT_VOID, _/binary>>) ->
