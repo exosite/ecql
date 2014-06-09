@@ -503,8 +503,8 @@ read_rows(<<RowCount:?T_INT32, Body/binary>>, ColTypes) ->
 %%------------------------------------------------------------------------------
 % [bytes]: A [int] n, followed by n bytes if n >= 0. If n < 0,
 %          no byte should follow and the value represented is `null`.
-read_bytes(<<0:?T_INT32, Rest/binary>>) ->
-  {<<>>, Rest}
+read_bytes(<<Len:?T_INT32, Rest/binary>>) when Len < 0 ->
+  {undefined, Rest}
 ;
 read_bytes(<<Len:?T_INT32, Value:Len/binary, Rest/binary>>) ->
   {Value, Rest}
@@ -574,6 +574,10 @@ format_specs(ColSpecs) ->
 .
 
 %%------------------------------------------------------------------------------
+% CQL null == undefined
+convert(_, undefined) ->
+  undefined
+;
 % 0x0001    Ascii
 convert(1, Value) ->
   binary_to_list(Value)
