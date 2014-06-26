@@ -87,7 +87,7 @@ start_link() ->
 init(_) ->
    % Sleeping to calm down fast restarts on crash
    timer:sleep(1000)
-  ,ecql_statements = ets:new(ecql_statements, [named_table, public, {read_concurrency, true}])
+  ,ecql_statements = ets:new(ecql_statements, [named_table, public, {read_concurrency, true}, {keypos, 2}])
   ,Configuration = application:get_all_env()
   ,init_keyspace(Configuration)
   ,Count = proplists:get_value(connections, Configuration, 4)

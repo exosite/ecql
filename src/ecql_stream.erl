@@ -39,7 +39,7 @@
 %% Records
 -record(state, {connection, sender, stream, async_pending = 0}).
 -record(metadata, {flags, columnspecs, paging_state}).
--record(preparedstatement, {id, metadata, result_metadata}).
+-record(preparedstatement, {id, cql, metadata, result_metadata}).
 -record(paging, {flag, page_state}).
 
 %%-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
@@ -51,33 +51,46 @@ query(Id, Cql) ->
   query(Id, Cql, [], ?CL_ONE)
 .
 query(Id, Cql, Args, Consistency) ->
-  gen_server:call(Id, {query, Cql, Args, Consistency}, ?TIMEOUT)
+  do_query(Id, call, query, Cql, Args, Consistency)
+.
+do_query(Id, Method, Function, Cql, Args, Consistency) ->
+  case prepare_statement(Id, Cql, Args) of
+    {ok, Prep} ->
+      case Method of
+        cast ->
+          gen_server:cast(Id, {Function, Prep, Args, Consistency})
+        ;
+        call ->
+          gen_server:call(Id, {Function, Prep, Args, Consistency}, ?TIMEOUT)
+        %~
+      end
+    ;
+    Error ->
+      Error
+    %~
+  end
 .
 
 %%------------------------------------------------------------------------------
 query_async(Id, Cql, Args, Consistency) ->
-   case tick(?MAX_PENDING) of
-      true ->
-        gen_server:call(Id, {query, Cql, Args, Consistency}, ?TIMEOUT)
-      ;
-      false ->
-        gen_server:cast(Id, {query, Cql, Args, Consistency})
-      %~
-   end
-  ,ok
+  case tick(?MAX_PENDING) of
+      true  -> Method = call
+     ;false -> Method = cast
+  end
+  ,do_query(Id, Method, query, Cql, Args, Consistency)
 .
 
 %%------------------------------------------------------------------------------
 query_batch(_, _, [], _) ->
   ok
 ;
-query_batch(Id, Cql, ListOfArgs, Consistency) when length(ListOfArgs) > 65535 ->
-   {ListOfArgs1, ListOfArgs2} = lists:split(65535, ListOfArgs)
+query_batch(Id, Cql, ListOfArgs, Consistency) when length(ListOfArgs) > 4096 ->
+   {ListOfArgs1, ListOfArgs2} = lists:split(4096, ListOfArgs)
   ,query_batch(Id, Cql, ListOfArgs1, Consistency)
   ,query_batch(Id, Cql, ListOfArgs2, Consistency)
 ;
 query_batch(Id, Cql, ListOfArgs, Consistency) ->
-  gen_server:call(Id, {query_batch, Cql, ListOfArgs, Consistency}, ?TIMEOUT)
+  do_query(Id, call, query_batch, Cql, ListOfArgs, Consistency)
 .
 
 %%-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
@@ -100,37 +113,33 @@ stop(Stream) ->
 .
 
 %%------------------------------------------------------------------------------
-handle_call({query, Cql, [], Consistency}, _From, State) ->
-   State1 = wait_async(State)
-  ,{ok, Result} = do_query(Cql, [], Consistency, State1, ?ENABLED_PAGING, [])
+handle_call({query, Statement, Args, Consistency}, _From, State0) ->
+   State1 = wait_async(State0)
+  ,{ok, Result} = query_all_pages(Statement, Args, Consistency, State1, ?ENABLED_PAGING, [])
   ,{reply, Result, State1}
 ;
-handle_call({query, Cql, Args, Consistency}, _From, State) ->
-   State1 = wait_async(State)
-  ,{ok, Result, State2} = do_query(Cql, Args, Consistency, State1, ?ENABLED_PAGING, [])
-  ,{reply, Result, State2}
+handle_call({prepare, Cql}, _From, State0) ->
+   State1 = wait_async(State0)
+  ,send_frame(
+     State1
+    ,?OP_PREPARE
+    ,wire_longstring(Cql)
+  )
+  ,{reply, recv_frame(Cql), State1}
 ;
 handle_call({query_batch, Cql, ListOfArgs, Consistency}, _From, State) ->
    State1 = wait_async(State)
-  ,{ok, State2} = execute_batch(Cql, ListOfArgs, Consistency, State1)
-  ,{reply, recv_frame(), State2}
+  ,execute_batch(Cql, ListOfArgs, Consistency, State1)
+  ,{reply, recv_frame(Cql), State1}
 ;
 handle_call(stop, _From, State) ->
   {stop, normal, ok, State}
 .
 
 %%------------------------------------------------------------------------------
-handle_cast({query, Cql, [], Consistency}, State = #state{async_pending = Pending}) ->
-   execute_query(Cql, [], Consistency, State, ?DISABLED_PAGING)
+handle_cast({query, Statement, Args, Consistency}, State = #state{async_pending = Pending}) ->
+   execute_query(Statement, Args, Consistency, State, ?DISABLED_PAGING)
   ,{noreply, State#state{async_pending = Pending + 1}}
-;
-handle_cast({query, Cql, Args, Consistency}, State) ->
-   {ok, _, State1 = #state{async_pending = Pending}} = execute_query(Cql, Args, Consistency, State, ?DISABLED_PAGING)
-  ,{noreply, State1#state{async_pending = Pending + 1}}
-;
-handle_cast({query_batch, Cql, ListOfArgs, Consistency}, State) ->
-   {ok, State1 = #state{async_pending = Pending}} = execute_batch(Cql, ListOfArgs, Consistency, State)
-  ,{noreply, State1#state{async_pending = Pending + 1}}
 ;
 handle_cast(terminate ,State) ->
   {stop ,terminated ,State}
@@ -175,10 +184,6 @@ log(?OP_ERROR, Body) ->
 log(_ResponseOpCode, _ResponseBody) ->
   ok
 .
-do_log({error, ?ER_UNPREPARED, _Message}) ->
-  %% Error already logged from handle_response.
-  ok
-;
 do_log({error, Code, Message}) ->
   error_logger:error_msg("query_async: failed: {error, ~p, ~s}~n", [Code, Message])
 ;
@@ -187,49 +192,39 @@ do_log(Error) ->
 .
 
 %%------------------------------------------------------------------------------
-%%    do_query(Cql, [], Quorum, State, Paging, Rows) ->
-%%      {ok, Result} | {ok, Result, State2}
+%%  Function:
+%%    query_all_pages(Statement, Args, Quorum, State, Paging, Rows) ->
+%%      {ok, Result}
 %%
 %%  Description:
 %%    Send one or multiple queries to Cassandra to retrieve the Result of the
 %%    given Cql.
 %%------------------------------------------------------------------------------
-do_query(Cql, [], Consistency, State, Paging1, Rows) ->
-   execute_query(Cql, [], Consistency, State, Paging1)
-  ,RecvResult = recv_frame()
-  ,case redo_query(RecvResult, Paging1, Rows) of
+query_all_pages(Statement, Args, Consistency, State, Paging1, Rows) ->
+   execute_query(Statement, Args, Consistency, State, Paging1)
+  ,RecvResult = recv_frame(Statement)
+  ,case has_more_pages(RecvResult, Paging1, Rows) of
     {no, Result} ->
       {ok, Result}
     ;
     {yes, Paging2, RecvR} ->
-      do_query(Cql, [], Consistency, State, Paging2, Rows ++ RecvR)
-  end
-;
-do_query(Cql, Args, Consistency, State1, Paging1, Rows) ->
-   {ok, Metadata, State2} = execute_query(Cql, Args, Consistency, State1, Paging1)
-  ,RecvResult = recv_frame(Metadata)
-  ,case redo_query(RecvResult, Paging1, Rows) of
-    {no, Result} ->
-      {ok, Result, State2}
-    ;
-    {yes, Paging2, RecvR} ->
-      do_query(Cql, Args, Consistency, State1, Paging2, Rows ++ RecvR)
+      query_all_pages(Statement, Args, Consistency, State, Paging2, Rows ++ RecvR)
   end
 .
 
 %%------------------------------------------------------------------------------
 %%  Function:
-%%    redo_query(Result) -> {no, Result} | yes
+%%    has_more_pages(Result) -> {no, Result} | yes
 %%
 %%  Description:
 %%    According to the given Result, check if it is necessary to send another
 %%    query, i.e., we received paging_state from Cassandra where it would be
 %%    used in the next query.
 %%------------------------------------------------------------------------------
-redo_query(ok, _, _) ->
+has_more_pages(ok, _, _) ->
   {no, ok}
 ;
-redo_query(Result, Paging1, AccRows) ->
+has_more_pages(Result, Paging1, AccRows) ->
   case erlang:element(1, Result) of
     <<>> ->
        {<<>>, {Keys, Rows}} = Result
@@ -260,14 +255,17 @@ execute_query(Cql, [], Consistency, State, Paging) ->
     ,get_page_size(Paging)
     ,Paging#paging.page_state
    ]
-  ,ok = send_frame(State, ?OP_QUERY, Query)
-  ,ok
+  ,send_frame(State, ?OP_QUERY, Query)
 ;
-% Lazily prepares a query that has args and then executes it
-execute_query(Cql, Args, Consistency, State, Paging) ->
-   {StatementRec, State1} = prepare_statement(Cql, State)
-  ,#preparedstatement{id = Id, result_metadata = Metadata, metadata = RequestMetadata} = StatementRec
-  ,Query = [
+% Executes a prepared query
+execute_query(
+   #preparedstatement{id = Id, metadata = RequestMetadata}
+  ,Args
+  ,Consistency
+  ,State
+  ,Paging
+) ->
+   Query = [
      <<
        (size(Id)):?T_UINT16
       ,Id/binary
@@ -278,23 +276,24 @@ execute_query(Cql, Args, Consistency, State, Paging) ->
     ,get_page_size(Paging)
     ,Paging#paging.page_state
    ]
-  ,ok = send_frame(State1, ?OP_EXECUTE, Query)
-  ,{ok, Metadata, State1}
+  ,send_frame(State, ?OP_EXECUTE, Query)
 .
 
 %%------------------------------------------------------------------------------
-execute_batch(Cql, ListOfArgs, Consistency, State) ->
-   {StatementRec, State1} = prepare_statement(Cql, State)
-  ,#preparedstatement{id = Id, metadata = RequestMetadata} = StatementRec
-  ,Query = [
+execute_batch(
+   #preparedstatement{id = Id, metadata = RequestMetadata}
+  ,ListOfArgs
+  ,Consistency
+  ,State
+) ->
+   Query = [
      <<
        1:?T_UINT8 % type == 'unlogged'
       ,(length(ListOfArgs)):?T_UINT16
      >>
     | wire_batch(Id, ListOfArgs, Consistency, RequestMetadata)
    ]
-  ,ok = send_frame(State1, ?OP_BATCH, Query)
-  ,{ok, State1}
+  ,send_frame(State, ?OP_BATCH, Query)
 .
 wire_batch(_Id, [], Consistency, _RequestMetadata) ->
   [<<
@@ -364,30 +363,28 @@ get_paging_flag(Flag, PGState) ->
 .
 
 %%------------------------------------------------------------------------------
-prepare_statement(Cql, State) ->
+prepare_statement(_Id, Cql, []) ->
+  {ok, Cql}
+;
+prepare_statement(Id, Cql, _) ->
    Statement = iolist_to_binary(Cql)
   ,case ets:lookup(ecql_statements, Statement) of
     [] ->
-       State1 = wait_async(State)
-      ,StatementRec = prepare_query(Cql, State1)
-      ,Id = StatementRec#preparedstatement.id
-      ,ets:insert(ecql_statements, {Statement, StatementRec ,Id})
-      ,{StatementRec, State1}
+      case gen_server:call(Id, {prepare, Statement}) of
+        {ok, StatementRec0} ->
+           StatementRec1 = StatementRec0#preparedstatement{cql = Statement}
+          ,ets:insert(ecql_statements, StatementRec1)
+          ,{ok, StatementRec1}
+        ;
+        Error ->
+           Error
+        %~
+      end
     ;
-    [{Statement, StatementRec ,_Id}] ->
-       {StatementRec, State}
+    [StatementRec = #preparedstatement{}] ->
+       {ok, StatementRec}
     %~
-   end
-.
-
-%%------------------------------------------------------------------------------
-prepare_query(Statement, State) ->
-   ok = send_frame(
-     State
-    ,?OP_PREPARE
-    ,wire_longstring(Statement))
-  ,{ok, Id} = recv_frame()
-  ,Id
+  end
 .
 
 %%------------------------------------------------------------------------------
@@ -412,22 +409,19 @@ send_frame(
 .
 
 %%------------------------------------------------------------------------------
-recv_frame() ->
-  recv_frame(undefined)
-.
-recv_frame(Metadata) ->
+recv_frame(Statement) ->
   receive {frame, ResponseOpCode, ResponseBody} ->
-     handle_response(ResponseOpCode, ResponseBody, Metadata)
+     handle_response(ResponseOpCode, ResponseBody, Statement)
   end
 .
 
 %%------------------------------------------------------------------------------
-handle_response(?OP_RESULT, <<?RT_ROWS, Body/binary>>, undefined) ->
-   {#metadata{columnspecs = ColSpecs, paging_state = PageState}, Rest} = read_metadata(Body)
+handle_response(?OP_RESULT, <<?RT_ROWS, Body/binary>>, #preparedstatement{result_metadata = #metadata{columnspecs = ColSpecs}}) ->
+   {#metadata{paging_state = PageState}, Rest} = read_metadata(Body)
   ,{PageState, rows(Rest, ColSpecs)}
 ;
-handle_response(?OP_RESULT, <<?RT_ROWS, Body/binary>>, #metadata{columnspecs = ColSpecs}) ->
-   {#metadata{paging_state = PageState}, Rest} = read_metadata(Body)
+handle_response(?OP_RESULT, <<?RT_ROWS, Body/binary>>, _) ->
+   {#metadata{columnspecs = ColSpecs, paging_state = PageState}, Rest} = read_metadata(Body)
   ,{PageState, rows(Rest, ColSpecs)}
 ;
 handle_response(OpCode, Body, _) ->
@@ -436,11 +430,8 @@ handle_response(OpCode, Body, _) ->
 
 %%------------------------------------------------------------------------------
 handle_response(?OP_ERROR, <<?ER_UNPREPARED:?T_INT32, Len:?T_UINT16, Message:Len/binary, IdLen:?T_UINT16, Id:IdLen/binary>>) ->
-   ets:match_delete(ecql_statements ,{'_', '_', Id})
-  ,SMessage = binary_to_list(Message)
-  ,SId = binary_to_list(Id)
-  ,error_logger:error_msg("query failed: {error, ~p, ~s ,~s}~n", [?ER_UNPREPARED, Message ,SId])
-  ,{error, ?ER_UNPREPARED, SMessage}
+   ets:match_delete(ecql_statements ,{'_','_', '_', Id})
+  ,{error, ?ER_UNPREPARED, binary_to_list(Message)}
 ;
 handle_response(?OP_ERROR, <<Code:?T_INT32, Len:?T_UINT16, Message:Len/binary, _Rest/binary>>) ->
   {error, Code, binary_to_list(Message)}
