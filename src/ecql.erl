@@ -109,7 +109,7 @@ init_keyspace(Configuration) ->
     ,data_centers(Strategy, Factor)
     ,"} "
    ]
-  ,accept_ok(ecql_stream:query(Stream, CQL))
+  ,log(ecql_stream:query(Stream, CQL), query, [Stream, CQL])
   ,ok = ecql_connection:stop(Connection)
 .
 data_centers("SimpleStrategy", Factor) ->
@@ -245,7 +245,7 @@ execute(Cql, Args) ->
   execute(Cql, Args, ?CL_ONE)
 .
 execute(Cql, Args, Consistency) ->
-  accept_ok(anystream(query, [Cql, Args, Consistency]))
+  with_stream_do(query, [Cql, Args, Consistency])
 .
 
 %%------------------------------------------------------------------------------
@@ -256,7 +256,7 @@ execute_async(Cql, Args) ->
   execute_async(Cql, Args, ?CL_ONE)
 .
 execute_async(Cql, Args, Consistency) ->
-  accept_ok(anystream(query_async, [Cql, Args, Consistency]))
+  with_stream_do(query_async, [Cql, Args, Consistency])
 .
 
 %%------------------------------------------------------------------------------
@@ -267,42 +267,33 @@ execute_batch(Cql, [], Consistency) ->
   ok
 ;
 execute_batch(Cql, ListOfArgs, Consistency) ->
-  accept_ok(anystream(query_batch, [Cql, ListOfArgs, Consistency]))
+  with_stream_do(query_batch, [Cql, ListOfArgs, Consistency])
 .
 
 %%------------------------------------------------------------------------------
 create_index(Indexname, Tablename, Columnname) ->
-  accept_ok(anystream(query, [[
+  with_stream_do(query, [[
      "CREATE INDEX IF NOT EXISTS ", Indexname, " ON ", Tablename
     ," (", Columnname, ");"
-  ]]))
+  ]])
 .
 
 %%------------------------------------------------------------------------------
 create_table(Tablename, TableDef) ->
-  accept_ok(anystream(query, [[
+  with_stream_do(query, [[
      "CREATE TABLE IF NOT EXISTS ", Tablename, " ( ", TableDef, " ) WITH "
     ,?COMPACTION
     ,";"
-  ]]))
+  ]])
 .
 
 %%------------------------------------------------------------------------------
 create_table(Tablename, TableDef, Comment) ->
-  accept_ok(anystream(query, [[
+  with_stream_do(query, [[
      "CREATE TABLE IF NOT EXISTS ", Tablename, " ( ", TableDef, " ) WITH "
     ,?COMPACTION
     ," AND comment='", Comment, "';"
-  ]]))
-.
-
-%%------------------------------------------------------------------------------
-accept_ok({error, Code, Message} = Ret) ->
-   error_logger:error_msg("query failed: {error, ~p, ~s}~n", [Code, Message])
-  ,Ret
-;
-accept_ok(Ret) ->
-  Ret
+  ]])
 .
 
 %%------------------------------------------------------------------------------
@@ -354,7 +345,7 @@ indexof(Element, [_ | Tail]) ->
 .
 
 %%------------------------------------------------------------------------------
-anystream(Function, Args) ->
+with_stream_do(Function, Args) ->
   Stream = case get(last_ccon) of
     undefined ->
        Connection = gen_server:call(?MODULE, connection, infinity)
@@ -366,14 +357,27 @@ anystream(Function, Args) ->
        LastStream
     %~
   end
-  ,try apply(ecql_stream, Function, [Stream | Args])
+  ,try log(apply(ecql_stream, Function, [Stream | Args]), Function, Args)
    catch
      exit:{noproc, _} ->
        put(last_ccon, undefined)
-      ,anystream(Function, Args)
+      ,with_stream_do(Function, Args)
      %~
    end
 .
+
+%%------------------------------------------------------------------------------
+log({error, Code, Message} = Ret, Function, Args) ->
+  error_logger:error_msg(
+     "ecql_stream:~p(~p) failed: {error, ~p, ~s}~n"
+    ,[Function, Args, Code, Message]
+  )
+  ,Ret
+;
+log(Ret, _Function, _Args) ->
+  Ret
+.
+
 
 %%==============================================================================
 %% END OF FILE
