@@ -37,7 +37,7 @@
 -include("ecql.hrl").
 
 %% Records
--record(state, {connection, sender, stream, async_pending = 0}).
+-record(state, {connection, sender, stream, async_pending = 0, monitorRef}).
 -record(metadata, {flags, columnspecs, paging_state}).
 -record(preparedstatement, {id, cql, metadata, result_metadata}).
 -record(paging, {flag, page_state}).
@@ -132,6 +132,10 @@ handle_call({query_batch, Cql, ListOfArgs, Consistency}, _From, State) ->
   ,execute_batch(Cql, ListOfArgs, Consistency, State1)
   ,{reply, recv_frame(Cql), State1}
 ;
+handle_call(monitor, {From, _Ref}, State) ->
+   Ref = monitor(process, From)
+  ,{reply, ok, State#state{monitorRef = Ref}}
+;
 handle_call(stop, _From, State) ->
   {stop, normal, ok, State}
 .
@@ -150,6 +154,10 @@ handle_cast(terminate ,State) ->
 handle_info({frame, ResponseOpCode, ResponseBody}, State = #state{async_pending = Pending}) ->
    log(ResponseOpCode, ResponseBody)
   ,{noreply, State#state{async_pending = Pending - 1}}
+;
+handle_info({'DOWN', MonitorRef, _Type, _Object, _Info}, State = #state{connection = Conn, monitorRef = MonitorRef}) ->
+   ok = gen_server:call(Conn, {add_stream, self()}, infinity)
+  ,{noreply, State#state{monitorRef = undefined}}
 .
 
 %%------------------------------------------------------------------------------

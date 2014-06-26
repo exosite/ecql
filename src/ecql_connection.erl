@@ -28,7 +28,7 @@
 -include("ecql.hrl").
 
 %% Records
--record(state, {socket, pool, counter, sender}).
+-record(state, {socket, pool, available, counter, sender, waiting = []}).
 
 %%-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 %% Public API
@@ -36,7 +36,9 @@
 
 %%------------------------------------------------------------------------------
 get_stream(Connection) ->
-  gen_server:call(Connection, get_stream, infinity)
+   Stream = gen_server:call(Connection, get_stream, infinity)
+  ,ok = gen_server:call(Stream, monitor, infinity)
+  ,Stream
 .
 
 %%------------------------------------------------------------------------------
@@ -66,8 +68,8 @@ init(Configuration) ->
   ,ok = auth(waitforframe(), User, Pass)
   ,PoolSize = proplists:get_value(streams_per_connection, Configuration, 25)
   ,{ok, Sender} = ecql_sender:start_link(Socket)
-  ,Pool = list_to_tuple(init_pool(PoolSize, Sender))
-  ,{ok, #state{socket=Socket, pool=Pool, counter=0, sender = Sender}}
+  ,Pool = init_pool(PoolSize, Sender)
+  ,{ok, #state{socket=Socket, pool=list_to_tuple(Pool), available=Pool, counter=0, sender = Sender}}
 .
 init_pool(0, _Sender) ->
   []
@@ -86,9 +88,19 @@ stop(Connection) ->
 .
 
 %%------------------------------------------------------------------------------
-handle_call(get_stream, _From, State = #state{pool=Pool, counter=Counter}) ->
-   StreamId = (Counter rem size(Pool)) + 1
-  ,{reply, element(StreamId, Pool), State#state{counter=Counter+1}}
+handle_call(get_stream, Client, State = #state{available = [], waiting = Waiting, counter = Counter}) ->
+   {noreply, State#state{waiting = [Client | Waiting], counter = Counter + 1}}
+;
+handle_call(get_stream, _From, State = #state{available = Streams, counter = Counter}) ->
+   [Stream | NewAvailable] = Streams
+  ,{reply, Stream, State#state{available = NewAvailable, counter = Counter + 1}}
+;
+handle_call({add_stream, Stream}, _From, State = #state{available = Streams, waiting = []}) ->
+  {reply, ok, State#state{available= [Stream | Streams]}}
+;
+handle_call({add_stream, Stream}, _From, State = #state{waiting = [Client | Rest]}) ->
+   gen_server:reply(Client, Stream)
+  ,{reply, ok, State#state{waiting = Rest}}
 ;
 handle_call(get_streams, _From, State = #state{pool=Pool}) ->
   {reply, Pool, State}
