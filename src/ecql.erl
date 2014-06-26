@@ -245,7 +245,7 @@ execute(Cql, Args) ->
   execute(Cql, Args, ?CL_ONE)
 .
 execute(Cql, Args, Consistency) ->
-  accept_ok(ecql_stream:query(anystream(), Cql, Args, Consistency))
+  accept_ok(anystream(query, [Cql, Args, Consistency]))
 .
 
 %%------------------------------------------------------------------------------
@@ -256,41 +256,44 @@ execute_async(Cql, Args) ->
   execute_async(Cql, Args, ?CL_ONE)
 .
 execute_async(Cql, Args, Consistency) ->
-  accept_ok(ecql_stream:query_async(anystream(), Cql, Args, Consistency))
+  accept_ok(anystream(query_async, [Cql, Args, Consistency]))
 .
 
 %%------------------------------------------------------------------------------
 execute_batch(Cql, ListOfArgs) ->
   execute_batch(Cql, ListOfArgs, ?CL_ONE)
 .
+execute_batch(Cql, [], Consistency) ->
+  ok
+;
 execute_batch(Cql, ListOfArgs, Consistency) ->
-  accept_ok(ecql_stream:query_batch(anystream(), Cql, ListOfArgs, Consistency))
+  accept_ok(anystream(query_batch, [Cql, ListOfArgs, Consistency]))
 .
 
 %%------------------------------------------------------------------------------
 create_index(Indexname, Tablename, Columnname) ->
-  accept_ok(ecql_stream:query(anystream() ,[
+  accept_ok(anystream(query, [[
      "CREATE INDEX IF NOT EXISTS ", Indexname, " ON ", Tablename
     ," (", Columnname, ");"
-  ]))
+  ]]))
 .
 
 %%------------------------------------------------------------------------------
 create_table(Tablename, TableDef) ->
-  accept_ok(ecql_stream:query(anystream() ,[
+  accept_ok(anystream(query, [[
      "CREATE TABLE IF NOT EXISTS ", Tablename, " ( ", TableDef, " ) WITH "
     ,?COMPACTION
     ,";"
-  ]))
+  ]]))
 .
 
 %%------------------------------------------------------------------------------
 create_table(Tablename, TableDef, Comment) ->
-  accept_ok(ecql_stream:query(anystream() ,[
+  accept_ok(anystream(query, [[
      "CREATE TABLE IF NOT EXISTS ", Tablename, " ( ", TableDef, " ) WITH "
     ,?COMPACTION
     ," AND comment='", Comment, "';"
-  ]))
+  ]]))
 .
 
 %%------------------------------------------------------------------------------
@@ -351,26 +354,25 @@ indexof(Element, [_ | Tail]) ->
 .
 
 %%------------------------------------------------------------------------------
-anystream() ->
-  case get(last_ccon) of
+anystream(Function, Args) ->
+  Stream = case get(last_ccon) of
     undefined ->
        Connection = gen_server:call(?MODULE, connection, infinity)
-      ,Stream = ecql_connection:get_stream(Connection)
-      ,put(last_ccon, Stream)
-      ,Stream
+      ,Stream0 = ecql_connection:get_stream(Connection)
+      ,put(last_ccon, Stream0)
+      ,Stream0
     ;
     LastStream ->
-      case is_process_alive(LastStream) of
-        true ->
-           LastStream
-        ;
-        false ->
-           put(last_ccon, undefined)
-          ,anystream()
-        %~
-      end
+       LastStream
     %~
   end
+  ,try apply(ecql_stream, Function, [Stream | Args])
+   catch
+     exit:{noproc, _} ->
+       put(last_ccon, undefined)
+      ,anystream(Function, Args)
+     %~
+   end
 .
 
 %%==============================================================================
