@@ -37,7 +37,7 @@
 -include("ecql.hrl").
 
 %% Records
--record(state, {connection, sender, stream, async_pending = 0, monitorRef}).
+-record(state, {connection, sender, stream, async_pending = 0, monitor_ref, async_laststmt, laststmt}).
 -record(metadata, {flags, columnspecs, paging_state}).
 -record(preparedstatement, {id, cql, metadata, result_metadata}).
 -record(paging, {flag, page_state}).
@@ -116,7 +116,7 @@ stop(Stream) ->
 handle_call({query, Statement, Args, Consistency}, _From, State0) ->
    State1 = wait_async(State0)
   ,{ok, Result} = query_all_pages(Statement, Args, Consistency, State1, ?ENABLED_PAGING, [])
-  ,{reply, Result, State1}
+  ,{reply, Result, State1#state{laststmt = Statement}}
 ;
 handle_call({prepare, Cql}, _From, State0) ->
    State1 = wait_async(State0)
@@ -130,11 +130,11 @@ handle_call({prepare, Cql}, _From, State0) ->
 handle_call({query_batch, Cql, ListOfArgs, Consistency}, _From, State) ->
    State1 = wait_async(State)
   ,execute_batch(Cql, ListOfArgs, Consistency, State1)
-  ,{reply, recv_frame(Cql), State1}
+  ,{reply, recv_frame(Cql), State1#state{laststmt = Cql}}
 ;
 handle_call(monitor, {From, _Ref}, State) ->
    Ref = monitor(process, From)
-  ,{reply, ok, State#state{monitorRef = Ref}}
+  ,{reply, ok, State#state{monitor_ref = Ref}}
 ;
 handle_call(stop, _From, State) ->
   {stop, normal, ok, State}
@@ -143,7 +143,7 @@ handle_call(stop, _From, State) ->
 %%------------------------------------------------------------------------------
 handle_cast({query, Statement, Args, Consistency}, State = #state{async_pending = Pending}) ->
    execute_query(Statement, Args, Consistency, State, ?DISABLED_PAGING)
-  ,{noreply, State#state{async_pending = Pending + 1}}
+  ,{noreply, State#state{async_pending = Pending + 1, async_laststmt = Statement}}
 ;
 handle_cast(terminate ,State) ->
   {stop ,terminated ,State}
@@ -152,12 +152,12 @@ handle_cast(terminate ,State) ->
 %%------------------------------------------------------------------------------
 % Async message incoming
 handle_info({frame, ResponseOpCode, ResponseBody}, State = #state{async_pending = Pending}) ->
-   log(ResponseOpCode, ResponseBody)
+   log(ResponseOpCode, ResponseBody, State)
   ,{noreply, State#state{async_pending = Pending - 1}}
 ;
-handle_info({'DOWN', MonitorRef, _Type, _Object, _Info}, State = #state{connection = Conn, monitorRef = MonitorRef}) ->
+handle_info({'DOWN', MonitorRef, _Type, _Object, _Info}, State = #state{connection = Conn, monitor_ref = MonitorRef}) ->
    ok = gen_server:call(Conn, {add_stream, self()}, infinity)
-  ,{noreply, State#state{monitorRef = undefined}}
+  ,{noreply, State#state{monitor_ref = undefined}}
 .
 
 %%------------------------------------------------------------------------------
@@ -180,23 +180,23 @@ wait_async(State = #state{async_pending = 0}) ->
 ;
 wait_async(State = #state{async_pending = Pending}) ->
    receive {frame, ResponseOpCode, ResponseBody} ->
-     log(ResponseOpCode, ResponseBody)
+     log(ResponseOpCode, ResponseBody, State)
     ,wait_async(State#state{async_pending = Pending - 1})
    end
 .
 
 %%------------------------------------------------------------------------------
-log(?OP_ERROR, Body) ->
-  do_log(handle_response(?OP_ERROR, Body))
+log(?OP_ERROR, Body, State) ->
+  do_log(handle_response(?OP_ERROR, Body), State)
 ;
-log(_ResponseOpCode, _ResponseBody) ->
+log(_ResponseOpCode, _ResponseBody, _State) ->
   ok
 .
-do_log({error, Code, Message}) ->
-  error_logger:error_msg("query_async: failed: {error, ~p, ~s}~n", [Code, Message])
+do_log({error, Code, Message}, State) ->
+  error_logger:error_msg("query_async: failed: {error, ~p, ~s} state: ~p~n", [Code, Message, State])
 ;
-do_log(Error) ->
-  error_logger:error_msg("query_async: failed: ~p~n", [Error])
+do_log(Error, State) ->
+  error_logger:error_msg("query_async: failed: ~p sate: ~p~n", [Error, State])
 .
 
 %%------------------------------------------------------------------------------
