@@ -39,7 +39,7 @@
 %% Records
 -record(state, {connection, sender, stream, async_pending = 0, monitor_ref, async_laststmt, laststmt}).
 -record(metadata, {flags, columnspecs, paging_state}).
--record(preparedstatement, {id, cql, metadata, result_metadata}).
+-record(preparedstatement, {cql, id, metadata, result_metadata}).
 -record(paging, {flag, page_state}).
 
 %%-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
@@ -438,7 +438,7 @@ handle_response(OpCode, Body, _) ->
 
 %%------------------------------------------------------------------------------
 handle_response(?OP_ERROR, <<?ER_UNPREPARED:?T_INT32, Len:?T_UINT16, Message:Len/binary, IdLen:?T_UINT16, Id:IdLen/binary>>) ->
-   ets:match_delete(ecql_statements ,{'_','_', '_', Id})
+   ets:match_delete(#preparedstatement{id = Id, _ = '_'})
   ,{error, ?ER_UNPREPARED, binary_to_list(Message)}
 ;
 handle_response(?OP_ERROR, <<Code:?T_INT32, Len:?T_UINT16, Message:Len/binary, _Rest/binary>>) ->
