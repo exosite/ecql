@@ -263,7 +263,7 @@ execute_async(Cql, Args, Consistency) ->
 execute_batch(Cql, ListOfArgs) ->
   execute_batch(Cql, ListOfArgs, ?CL_ONE)
 .
-execute_batch(Cql, [], Consistency) ->
+execute_batch(_Cql, [], _Consistency) ->
   ok
 ;
 execute_batch(Cql, ListOfArgs, Consistency) ->
