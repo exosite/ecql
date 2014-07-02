@@ -745,6 +745,10 @@ wire_bigint(Value) ->
 .
 
 %%------------------------------------------------------------------------------
+wire_int(Value) when Value > 2147483647 ->
+   error_logger:error_msg("wire_int(): truncating integer ~p~n", [Value])
+  ,wire_int(2147483647)
+;
 wire_int(Value) ->
   <<4:?T_INT32, Value:?T_INT32>>
 .
