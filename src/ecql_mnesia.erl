@@ -17,6 +17,7 @@
   ,create_table/2
   ,delete/1, delete/3
   ,delete_object/1
+  ,delete_table/1
   ,dirty_all_keys/1
   ,dirty_delete/1, dirty_delete/3
   ,dirty_delete_object/1
@@ -353,6 +354,14 @@ change_table_copy_type(_Schema,_This,_DiscCopies) ->
 %%------------------------------------------------------------------------------
 clear_table(RecordName) when is_atom(RecordName) ->
   case ecql:execute(["TRUNCATE ", map_recordname(RecordName)]) of
+     ok -> {atomic ,ok}
+    ;Error -> {error, Error}
+  end
+.
+
+%%------------------------------------------------------------------------------
+delete_table(RecordName) when is_atom(RecordName) ->
+  case ecql:execute(["DROP TABLE ", map_recordname(RecordName)]) of
      ok -> {atomic ,ok}
     ;Error -> {error, Error}
   end
