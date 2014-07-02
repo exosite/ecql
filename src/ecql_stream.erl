@@ -378,7 +378,7 @@ prepare_statement(Id, Cql, _) ->
    Statement = iolist_to_binary(Cql)
   ,case ets:lookup(ecql_statements, Statement) of
     [] ->
-      case gen_server:call(Id, {prepare, Statement}) of
+      case gen_server:call(Id, {prepare, Statement}, infinity) of
         {ok, StatementRec0} ->
            StatementRec1 = StatementRec0#preparedstatement{cql = Statement}
           ,ets:insert(ecql_statements, StatementRec1)
