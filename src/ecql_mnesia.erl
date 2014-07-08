@@ -48,6 +48,12 @@
   ,write/1
 ]).
 
+%% Extensions Updating (from ets)
+-export([
+   update_element/3
+]).
+
+
 %% Extensions Counting
 -export([
    count/2
@@ -153,24 +159,9 @@ dirty_write(Record)  ->
   write(Record)
 .
 write(Record) when is_tuple(Record) ->
-   [RecordName | RecordValues] = RecordList = tuple_to_list(Record)
-  ,Result = write(RecordList)
-  ,ecql_cache:dirty({RecordName, hd(RecordValues)})
-  ,[
-    ecql_cache:dirty({RecordName, element(I, Record), I})
-    || I <- lists:seq(3, length(RecordValues)+1), is_binary(element(I, Record))
-   ]
-  ,Result
-;
-write([RecordName | RecordValues]) when is_atom(RecordName) ->
-  ecql:execute([
-     "INSERT INTO ", map_recordname(RecordName)
-    ," ("
-    ,implode($,, fields(RecordValues))
-    ,") VALUES (?"
-    ,string:copies(",?", length(RecordValues) - 1)
-    ,");"
-  ], [ecql:term_to_bin(Value) || Value <- RecordValues] ,?CL_LOCAL_QUORUM)
+   [RecordName, Key | RecordValues] = tuple_to_list(Record)
+  ,List = lists:zip(lists:seq(3, length(RecordValues) + 2), RecordValues)
+  ,update_element(RecordName, Key, List)
 .
 
 %%------------------------------------------------------------------------------
@@ -653,6 +644,28 @@ do_foldr(Fun, {Value, Iter}, Acc) ->
   do_foldr(Fun, next(Iter), Fun(Value, Acc))
 .
 
+%%------------------------------------------------------------------------------
+update_element(RecordName, Key, Tuple) when is_tuple(Tuple) ->
+  update_element(RecordName, Key, [Tuple])
+;
+update_element(RecordName, Key, List) ->
+   {RecordIndexes, RecordValues} = lists:unzip([{2, Key} | List])
+  ,FieldNames = [map_fieldindex(RecordIndex - 2) || RecordIndex <- RecordIndexes]
+  ,Result = ecql:execute(
+     [
+       "INSERT INTO ", map_recordname(RecordName) ," ("
+      ,implode($,, FieldNames)
+      ,") VALUES (?"
+      ,string:copies(",?", length(RecordValues) - 1) ,");"
+    ]
+    ,[ecql:term_to_bin(Value) || Value <- RecordValues]
+    ,?CL_LOCAL_QUORUM
+  )
+  ,ecql_cache:dirty({RecordName, Key})
+  ,[ecql_cache:dirty({RecordName, Value, Index}) || {Index, Value} <- List, is_binary(Value)]
+  ,Result
+.
+
 %%-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 %% Private API
 %%-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
@@ -777,8 +790,7 @@ and_pairs(List) ->
 
 %%------------------------------------------------------------------------------
 implode(Sep, List) ->
-   [Sep | Result] = implode_concat(Sep, List)
-  ,Result
+   tl(implode_concat(Sep, List))
 .
 
 %%------------------------------------------------------------------------------
