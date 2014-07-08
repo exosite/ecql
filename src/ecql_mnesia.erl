@@ -80,8 +80,8 @@
 
 %% Extensions Traversing (inspired by gb_trees)
 -export([
-    iterator/1
-   ,next/1
+   iterator/1
+  ,next/1
 ]).
 
 %%-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
