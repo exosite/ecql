@@ -680,7 +680,7 @@ dirty([RecordName, KeyValue | RecordValues]) ->
    ecql_cache:dirty({RecordName, KeyValue})
   ,do_dirty(RecordName, 3, RecordValues)
 .
-do_dirty(RecordName, N, []) ->
+do_dirty(_RecordName, _N, []) ->
   ok
 ;
 do_dirty(RecordName, N, [Value | RecordValues]) ->
