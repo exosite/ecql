@@ -159,9 +159,8 @@ dirty_write(Record)  ->
   write(Record)
 .
 write(Record) when is_tuple(Record) ->
-   [RecordName, Key | RecordValues] = tuple_to_list(Record)
-  ,List = lists:zip(lists:seq(3, length(RecordValues) + 2), RecordValues)
-  ,update_element(RecordName, Key, List)
+   dirty([RecordName | RecordValues] = tuple_to_list(Record))
+  ,do_update_element(RecordName, lists:seq(2, tuple_size(Record)), RecordValues)
 .
 
 %%------------------------------------------------------------------------------
@@ -250,16 +249,10 @@ delete_object(Records) when is_list(Records) ->
 delete_object(Record) when is_tuple(Record) ->
   % Correct Impl?
   % Should delete all object according to the pattern or only based on prim key?
-   [RecordName | RecordValues] = tuple_to_list(Record)
+   dirty([RecordName | RecordValues] = tuple_to_list(Record))
   ,{RecordName, Table} = lists:keyfind(RecordName, 1, get_tables())
   ,{type, Type} = lists:keyfind(type, 1, Table)
-  ,Result = do_delete_object(Type, RecordName, RecordValues)
-  ,ecql_cache:dirty({RecordName, hd(RecordValues)})
-  ,[
-    ecql_cache:dirty({RecordName, element(I, Record), I})
-    || I <- lists:seq(3, length(RecordValues)+1), is_binary(element(I, Record))
-   ]
-  ,Result
+  ,do_delete_object(Type, RecordName, RecordValues)
 .
 do_delete_object(set, RecordName, RecordValues) ->
    ecql:execute(
@@ -274,7 +267,6 @@ do_delete_object(bag, RecordName, RecordValues) ->
     ," WHERE ", Keys
   ], Values)
 .
-
 
 %%------------------------------------------------------------------------------
 % REALLY DONT!
@@ -650,8 +642,12 @@ update_element(RecordName, Key, Tuple) when is_tuple(Tuple) ->
 ;
 update_element(RecordName, Key, List) ->
    {RecordIndexes, RecordValues} = lists:unzip([{2, Key} | List])
-  ,FieldNames = [map_fieldindex(RecordIndex - 2) || RecordIndex <- RecordIndexes]
-  ,Result = ecql:execute(
+  ,dirty(RecordName, Key)
+  ,do_update_element(RecordName, RecordIndexes, RecordValues)
+.
+do_update_element(RecordName, RecordIndexes, RecordValues) ->
+   FieldNames = [map_fieldindex(RecordIndex - 2) || RecordIndex <- RecordIndexes]
+  ,ecql:execute(
      [
        "INSERT INTO ", map_recordname(RecordName) ," ("
       ,implode($,, FieldNames)
@@ -661,15 +657,38 @@ update_element(RecordName, Key, List) ->
     ,[ecql:term_to_bin(Value) || Value <- RecordValues]
     ,?CL_LOCAL_QUORUM
   )
-  ,ecql_cache:dirty({RecordName, Key})
-  ,[ecql_cache:dirty({RecordName, Value, Index}) || {Index, Value} <- List, is_binary(Value)]
-  ,Result
 .
 
 %%-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 %% Private API
 %%-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 
+dirty(RecordName, KeyValue) ->
+  case read(RecordName, KeyValue) of
+    [] ->
+      ok
+    ;
+    [Record] ->
+      dirty(Record)
+    %~
+  end
+.
+dirty(Record) when is_tuple(Record) ->
+   dirty(tuple_to_list(Record))
+;
+dirty([RecordName, KeyValue | RecordValues]) ->
+   ecql_cache:dirty({RecordName, KeyValue})
+  ,do_dirty(RecordName, 3, RecordValues)
+.
+do_dirty(RecordName, N, []) ->
+  ok
+;
+do_dirty(RecordName, N, [Value | RecordValues]) ->
+   ecql_cache:dirty({RecordName, Value, N})
+  ,do_dirty(RecordName, N + 1, RecordValues)
+.
+
+%%------------------------------------------------------------------------------
 select_records(RecordName, Cql, Args) when is_atom(RecordName) ->
    {_Keys, Rows} = ecql:select(Cql, Args)
   ,[list_to_tuple([RecordName | ecql:eval_all(RecordValues)]) || RecordValues <- Rows]
