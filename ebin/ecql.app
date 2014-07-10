@@ -7,7 +7,7 @@
   {
     application ,ecql ,[
        {description ,"ecql"}
-      ,{vsn ,"2014-07-08"}
+      ,{vsn ,"2014-07-10"}
       ,{modules ,[
          ecql
         ,ecql_cache
