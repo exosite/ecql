@@ -16,6 +16,7 @@
 -define(DUPLICATE_INDEX, 8704).
 % Compare default settings with CASSANDRA-5727
 -define(COMPACTION, "compaction = {'class': 'LeveledCompactionStrategy', 'sstable_size_in_mb': 160}").
+-define(CL_DEFAULT, ?CL_LOCAL_QUORUM).
 
 %% OTP application
 -export([start/2, stop/1]).
@@ -239,10 +240,10 @@ select(Cql, Args) ->
 
 %%------------------------------------------------------------------------------
 execute(Cql) ->
-  execute(Cql, [], ?CL_ONE)
+  execute(Cql, [])
 .
 execute(Cql, Args) ->
-  execute(Cql, Args, ?CL_ONE)
+  execute(Cql, Args, ?CL_DEFAULT)
 .
 execute(Cql, Args, Consistency) ->
   with_stream_do(query, [Cql, Args, Consistency])
@@ -250,10 +251,10 @@ execute(Cql, Args, Consistency) ->
 
 %%------------------------------------------------------------------------------
 execute_async(Cql) ->
-  execute_async(Cql, [], ?CL_ONE)
+  execute_async(Cql, [])
 .
 execute_async(Cql, Args) ->
-  execute_async(Cql, Args, ?CL_ONE)
+  execute_async(Cql, Args, ?CL_DEFAULT)
 .
 execute_async(Cql, Args, Consistency) ->
   with_stream_do(query_async, [Cql, Args, Consistency])
@@ -261,7 +262,7 @@ execute_async(Cql, Args, Consistency) ->
 
 %%------------------------------------------------------------------------------
 execute_batch(Cql, ListOfArgs) ->
-  execute_batch(Cql, ListOfArgs, ?CL_ONE)
+  execute_batch(Cql, ListOfArgs, ?CL_DEFAULT)
 .
 execute_batch(_Cql, [], _Consistency) ->
   ok
