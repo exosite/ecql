@@ -49,11 +49,14 @@
   ,quote/1
   ,select/1
   ,select/2
+  ,select/3
   ,select_value/1
   ,select_value/2
+  ,select_value/3
   ,select_column/1
   ,select_column/2
   ,select_column/3
+  ,select_column/4
   ,term_to_bin/1
   ,create_index/3
   ,create_table/2
@@ -199,12 +202,17 @@ config(Key, Value) ->
 
 %%------------------------------------------------------------------------------
 select_value(Cql) ->
-  select_value(Cql, [])
+  select_value(Cql, [], ?CL_DEFAULT)
 .
 
 %%------------------------------------------------------------------------------
 select_value(Cql, Args) ->
-  case select_column(Cql, 1, Args) of
+  select_value(Cql, Args, ?CL_DEFAULT)
+.
+
+%%------------------------------------------------------------------------------
+select_value(Cql, Args, Consistency) ->
+  case select_column(Cql, 1, Args ,Consistency) of
     [] ->
       undefined
     ;
@@ -216,26 +224,34 @@ select_value(Cql, Args) ->
 
 %%------------------------------------------------------------------------------
 select_column(Cql) ->
-  select_column(Cql, 1, [])
+  select_column(Cql, 1, [], ?CL_DEFAULT)
 .
 
 %%------------------------------------------------------------------------------
 select_column(Cql, Col) ->
-  select_column(Cql, Col, [])
+  select_column(Cql, Col, [], ?CL_DEFAULT)
 .
 
 %%------------------------------------------------------------------------------
 select_column(Cql, Col, Args) ->
-   {_Keys, Rows} = execute(Cql, Args)
+  select_column(Cql, Col, Args, ?CL_DEFAULT)
+.
+
+%%------------------------------------------------------------------------------
+select_column(Cql, Col, Args, Consistency) ->
+   {_Keys, Rows} = execute(Cql, Args, Consistency)
   ,[lists:nth(Col, Row) || Row <- Rows]
 .
 
 %%------------------------------------------------------------------------------
 select(Cql) ->
-  select(Cql, [])
+  execute(Cql, [] ,?CL_DEFAULT)
 .
 select(Cql, Args) ->
-  execute(Cql, Args)
+  execute(Cql, Args ,?CL_DEFAULT)
+.
+select(Cql, Args ,Consistency) ->
+  execute(Cql, Args ,Consistency)
 .
 
 %%------------------------------------------------------------------------------
