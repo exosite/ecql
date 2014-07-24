@@ -1,21 +1,21 @@
 %%==============================================================================
 %% Copyright (c) Exosite LLC
 %%
-%% cassandra.appup - OTP-compliant Application Update Configuration File
+%% ecql.appup - OTP-compliant Application Update Configuration File
 %%==============================================================================
 
   {
-     "2014-06-11"
+     "2014-07-24"
     ,[
       {
-         "2014-06-11"
+         "2014-07-24"
         ,[
         ]
       }
     ]
     ,[
       {
-         "2014-06-11"
+         "2014-07-24"
         ,[
         ]
       }
