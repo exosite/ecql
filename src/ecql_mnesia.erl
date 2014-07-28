@@ -427,8 +427,8 @@ dirty_update_counter(RecordName, KeyValue, Increment) when is_atom(RecordName) -
 .
 
 %%------------------------------------------------------------------------------
-dirty_select({continuation ,[] ,_NObjects}) ->
-  select({continuation ,[] ,_NObjects})
+dirty_select(Tuple) ->
+  select(Tuple)
 .
 select({continuation ,[] ,_NObjects}) ->
   '$end_of_table'
