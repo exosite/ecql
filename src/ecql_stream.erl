@@ -258,7 +258,7 @@ execute_query(Cql, [], Consistency, State, Paging) ->
      wire_longstring(Cql)
     ,<<
        Consistency:?T_UINT16
-      ,(get_flag([], Paging)):?T_UINT8
+      ,(get_flag([], Paging, undefined)):?T_UINT8
      >>
     ,get_page_size(Paging)
     ,Paging#paging.page_state
@@ -267,7 +267,11 @@ execute_query(Cql, [], Consistency, State, Paging) ->
 ;
 % Executes a prepared query
 execute_query(
-   #preparedstatement{id = Id, metadata = RequestMetadata}
+   #preparedstatement{
+    id = Id,
+    metadata = RequestMetadata,
+    result_metadata = #metadata{columnspecs = ResultColspec}
+  }
   ,Args
   ,Consistency
   ,State
@@ -278,7 +282,7 @@ execute_query(
        (size(Id)):?T_UINT16
       ,Id/binary
       ,Consistency:?T_UINT16
-      ,(get_flag(Args, Paging)):?T_UINT8
+      ,(get_flag(Args, Paging, ResultColspec)):?T_UINT8
      >>
     ,wire_values(Args, RequestMetadata)
     ,get_page_size(Paging)
@@ -339,10 +343,13 @@ get_page_size(#paging{flag = Flag}) ->
 %%    1: Values, 2: skip_metadata, 4: page_size, 8: with_paging_state,
 %%    10: serial_consistency
 %%------------------------------------------------------------------------------
-get_flag([], #paging{flag = Flag, page_state = PGState}) ->
+get_flag([], #paging{flag = Flag, page_state = PGState}, _) ->
   get_paging_flag(Flag, PGState)
 ;
-get_flag(_Args, #paging{flag = Flag, page_state = PGState}) ->
+get_flag(_Args, #paging{flag = Flag, page_state = PGState}, undefined) ->
+  1 + get_paging_flag(Flag, PGState)
+;
+get_flag(_Args, #paging{flag = Flag, page_state = PGState}, _) ->
   (3 + get_paging_flag(Flag, PGState))
 .
 
@@ -424,7 +431,7 @@ recv_frame(Statement) ->
 .
 
 %%------------------------------------------------------------------------------
-handle_response(?OP_RESULT, <<?RT_ROWS, Body/binary>>, #preparedstatement{result_metadata = #metadata{columnspecs = ColSpecs}}) ->
+handle_response(?OP_RESULT, <<?RT_ROWS, Body/binary>>, #preparedstatement{result_metadata = #metadata{columnspecs = ColSpecs}}) when ColSpecs =/= undefined ->
    {#metadata{paging_state = PageState}, Rest} = read_metadata(Body)
   ,{PageState, rows(Rest, ColSpecs)}
 ;
