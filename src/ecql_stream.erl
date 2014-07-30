@@ -590,7 +590,12 @@ convert(3, Value) ->
    Value
 ;
 % 0x0004    Boolean
-% NOPE
+convert(4, <<0>>) ->
+  false
+;
+convert(4, <<1>>) ->
+  true
+;
 % 0x0005    Counter
 convert(5, Value) ->
   convert_int(Value)
