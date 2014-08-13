@@ -517,9 +517,38 @@ read_bytes(<<Len:?T_INT32, Value:Len/binary, Rest/binary>>) ->
 .
 
 %%------------------------------------------------------------------------------
+% [short bytes]  A [short] n, followed by n bytes if n >= 0.
+read_sbytes(<<Len:?T_UINT16, Value:Len/binary, Rest/binary>>) ->
+  {Value, Rest}
+.
+
+%%------------------------------------------------------------------------------
 % The <column_name> is a [string] and <type> is an [option]
-read_colspec(<<Len:?T_INT16, Name:Len/binary, Type:?T_INT16, Rest/binary>>) when Type =/= 0 ->
-  {{binary_to_atom(Name, utf8), Type}, Rest}
+read_colspec(<<Len:?T_INT16, Name:Len/binary, Type:?T_INT16, Rest/binary>>) ->
+   {TypeDef, Rest2} = read_colspec_type(Type, Rest)
+  ,{{binary_to_atom(Name, utf8), TypeDef}, Rest2}
+.
+
+%%------------------------------------------------------------------------------
+
+read_colspec_type(0, _) ->
+  undefined
+;
+read_colspec_type(32, <<Type:?T_INT16, Rest/binary>>) ->
+   {ValueType, Rest2} = read_colspec_type(Type, Rest)
+  ,{{list, ValueType}, Rest2}
+;
+read_colspec_type(33, <<Type:?T_INT16, Rest/binary>>) ->
+   {KeyType, <<Type2:?T_INT16, Rest2/binary>>} = read_colspec_type(Type, Rest)
+  ,{ValueType, Rest3} = read_colspec_type(Type2, Rest2)
+  ,{{map, {KeyType, ValueType}}, Rest3}
+;
+read_colspec_type(34, <<Type:?T_INT16, Rest/binary>>) ->
+   {ValueType, Rest2} = read_colspec_type(Type, Rest)
+  ,{{set, ValueType}, Rest2}
+;
+read_colspec_type(Type, Rest) ->
+  {Type, Rest}
 .
 
 %%------------------------------------------------------------------------------
@@ -633,20 +662,31 @@ convert(13, Value) ->
 % 0x000E    Varint
 convert(14, Value) ->
   convert_int(Value)
-.
+;
 % 0x000F    Timeuuid
 % NOPE
 % 0x0010    Inet
 % NOPE
 % 0x0020    List: the value is an [option], representing the type
 %                of the elements of the list.
-% NOPE
+convert({list, ValueType}, <<Count:?T_UINT16, Body/binary>>) ->
+   {Values, <<>>} = readn(Count, Body, fun read_sbytes/1)
+  ,lists:map(fun(Value) -> convert(ValueType, Value) end, Values)
+;
 % 0x0021    Map: the value is two [option], representing the types of the
 %               keys and values of the map
-% NOPE
+convert({map, {KeyType, ValueType}}, <<Count:?T_UINT16, Body/binary>>) ->
+  {Values, <<>>} = readn(Count, Body, fun(BinRow) ->
+     {[Key, Value], RowRest} = readn(2, BinRow, fun read_sbytes/1)
+    ,{{convert(KeyType, Key), convert(ValueType, Value)}, RowRest}
+  end)
+  ,Values
+;
 % 0x0022    Set: the value is an [option], representing the type
 %                of the elements of the set
-% NOPE
+convert({set, ValueType}, Binary) ->
+  convert({list, ValueType}, Binary)
+.
 
 %%------------------------------------------------------------------------------
 convert_int(<<Value:?T_INT64>>) ->
@@ -680,8 +720,7 @@ tick(Max) ->
 %%------------------------------------------------------------------------------
 wire_values(Values, RequestMetadata) ->
    #metadata{columnspecs = {_, RequestTypes}} = RequestMetadata
-  ,Length = length(Values)
-  ,[<<Length:?T_UINT16>> | zipwith_wire(RequestTypes, Values, [])]
+  ,wire_shortlist(zipwith_wire(RequestTypes, Values, []))
 .
 
 %%------------------------------------------------------------------------------
@@ -689,14 +728,14 @@ zipwith_wire([], [], Acc) ->
   lists:reverse(Acc)
 ;
 zipwith_wire([T | RequestTypes], [V | Values], Acc) ->
-  zipwith_wire(RequestTypes, Values, [wire_value(T, V) | Acc])
+  zipwith_wire(RequestTypes, Values, [wire_longstring(wire_value(T, V)) | Acc])
 .
 
 
 %%------------------------------------------------------------------------------
 % 0x0001    Ascii
 wire_value(1, Value) ->
-  wire_longstring(Value)
+  Value
 ;
 % 0x0002    Bigint
 wire_value(2, Value) ->
@@ -704,7 +743,7 @@ wire_value(2, Value) ->
 ;
 % 0x0003    Blob
 wire_value(3, Value) ->
-  wire_longstring(Value)
+  Value
 ;
 % 0x0004    Boolean
 % NOPE
@@ -731,29 +770,46 @@ wire_value(11, Value) ->
 % NOPE
 % 0x000D    Varchar
 wire_value(13, Value) ->
-  wire_longstring(Value)
+  Value
 ;
 % 0x000E    Varint
 wire_value(14, Value) ->
   wire_bigint(Value)
-.
+;
 % 0x000F    Timeuuid
 % NOPE
 % 0x0010    Inet
 % NOPE
 % 0x0020    List: the value is an [option], representing the type
 %                of the elements of the list.
-% NOPE
+wire_value({list, ValueType}, Values) when is_list(Values) ->
+  wire_shortlist(lists:map(fun(Value) ->
+    wire_shortstring(wire_value(ValueType, Value))
+  end, Values))
+;
+wire_value({list, ValueType}, Value) ->
+  wire_value({list, ValueType}, [Value])
+;
 % 0x0021    Map: the value is two [option], representing the types of the
 %               keys and values of the map
-% NOPE
+wire_value({map, {KeyType, ValueType}}, Values) when is_list(Values) ->
+  wire_shortlist(lists:map(fun({Key, Value}) -> [
+     wire_shortstring(wire_value(KeyType, Key))
+    ,wire_shortstring(wire_value(ValueType, Value))
+  ] end, Values))
+;
+wire_value({map, ValueType}, Value) when is_tuple(Value) ->
+  wire_value({map, ValueType}, [Value])
+;
 % 0x0022    Set: the value is an [option], representing the type
 %                of the elements of the set
-% NOPE
+wire_value({set, ValueType}, Value) ->
+  wire_value({list, ValueType}, Value)
+.
 
 %%------------------------------------------------------------------------------
 wire_bigint(Value) ->
-  <<8:?T_INT32, Value:?T_INT64>>
+  <<Value:?T_INT64>>
 .
 
 %%------------------------------------------------------------------------------
@@ -762,7 +818,7 @@ wire_int(Value) when Value > 2147483647 ->
   ,wire_int(2147483647)
 ;
 wire_int(Value) ->
-  <<4:?T_INT32, Value:?T_INT32>>
+  <<Value:?T_INT32>>
 .
 
 %%------------------------------------------------------------------------------
@@ -774,6 +830,16 @@ wire_longstring(Value) when is_list(Value) ->
 ;
 wire_longstring(Value) when is_atom(Value) ->
   wire_longstring(atom_to_binary(Value, utf8))
+.
+
+%%------------------------------------------------------------------------------
+wire_shortlist(Value) ->
+  [<<(length(Value)):?T_UINT16>>, Value]
+.
+
+%%------------------------------------------------------------------------------
+wire_shortstring(Value) ->
+  [<<(iolist_size(Value)):?T_UINT16>>, Value]
 .
 
 %%==============================================================================
