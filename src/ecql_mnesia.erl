@@ -84,6 +84,11 @@
   ,next/1
 ]).
 
+%% Other Extensions
+-export([
+   select_records/3
+]).
+
 %%-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 %% Mnesia API
 %%-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
@@ -637,6 +642,12 @@ do_foldr(Fun, {Value, Iter}, Acc) ->
 .
 
 %%------------------------------------------------------------------------------
+select_records(RecordName, Cql, Args) when is_atom(RecordName) ->
+   {_Keys, Rows} = ecql:select(Cql, Args)
+  ,[list_to_tuple([RecordName | ecql:eval_all(RecordValues)]) || RecordValues <- Rows]
+.
+
+%%------------------------------------------------------------------------------
 update_element(RecordName, Key, Tuple) when is_tuple(Tuple) ->
   update_element(RecordName, Key, [Tuple])
 ;
@@ -686,12 +697,6 @@ do_dirty(_RecordName, _N, []) ->
 do_dirty(RecordName, N, [Value | RecordValues]) ->
    ecql_cache:dirty({RecordName, Value, N})
   ,do_dirty(RecordName, N + 1, RecordValues)
-.
-
-%%------------------------------------------------------------------------------
-select_records(RecordName, Cql, Args) when is_atom(RecordName) ->
-   {_Keys, Rows} = ecql:select(Cql, Args)
-  ,[list_to_tuple([RecordName | ecql:eval_all(RecordValues)]) || RecordValues <- Rows]
 .
 
 %%------------------------------------------------------------------------------
