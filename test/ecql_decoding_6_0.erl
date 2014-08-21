@@ -3,7 +3,7 @@
 %%
 %% ecql_stream.erl - Handler for one ongoing ecql stream
 %%==============================================================================
--module(ecql_decoding).
+-module(ecql_decoding_6_0).
 -compile(native).
 
 -include("../include/ecql.hrl").
@@ -16,7 +16,7 @@
 %%------------------------------------------------------------------------------
 test(X) ->
   R = lists:sum([do_test() || _ <- lists:seq(1, X)])/X,
-  io:format("~p iterations: ~p~n", [X, R])
+  io:format("~p ~p iterations: ~p~n", [?MODULE, X, R])
 .
 do_test() ->
   {Time, _} = timer:tc(fun read_rows/2, test_data()),
