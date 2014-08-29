@@ -298,7 +298,7 @@ execute_query(
 
 %%------------------------------------------------------------------------------
 execute_batch(
-   #preparedstatement{id = Id, metadata = RequestMetadata}
+   #preparedstatement{id = Id, metadata = #metadata{columnspecs = {_, RequestTypes}}}
   ,ListOfArgs
   ,Consistency
   ,State
@@ -308,27 +308,12 @@ execute_batch(
        1:?T_UINT8 % type == 'unlogged'
       ,(length(ListOfArgs)):?T_UINT16
      >>
-    | wire_batch(Id, ListOfArgs, Consistency, RequestMetadata)
+    | wire_batch(Id, ListOfArgs, Consistency, RequestTypes)
    ]
   ,send_frame(State, ?OP_BATCH, Query)
 .
-wire_batch(_Id, [], Consistency, _RequestMetadata) ->
-  [<<
-    Consistency:?T_UINT16
-  >>]
-;
-wire_batch(Id, [Args | ListOfArgs], Consistency, RequestMetadata) ->
-  [
-     <<
-       1:?T_UINT8 % kind == 'prepared query'
-      ,(size(Id)):?T_UINT16
-      ,Id/binary
-     >>
-    ,wire_values(Args, RequestMetadata)
-    | wire_batch(Id, ListOfArgs, Consistency, RequestMetadata)
-  ]
-.
 
+%%------------------------------------------------------------------------------
 get_page_size(#paging{flag = Flag}) ->
   if (Flag band 4) == 4 ->
     <<?RESULT_PAGE_SIZE:32>>
@@ -826,17 +811,58 @@ tick(Max) ->
 %%------------------------------------------------------------------------------
 wire_values(Values, RequestMetadata) ->
    #metadata{columnspecs = {_, RequestTypes}} = RequestMetadata
-  ,wire_shortlist(zipwith_wire(RequestTypes, Values, []))
+  ,wire_shortlist(zipwith_wire(RequestTypes, Values))
 .
 
 %%------------------------------------------------------------------------------
-zipwith_wire([], [], Acc) ->
-  lists:reverse(Acc)
+zipwith_wire([T1], [V1]) ->
+  [wire_longstring(wire_value(T1, V1))]
 ;
-zipwith_wire([T | RequestTypes], [V | Values], Acc) ->
-  zipwith_wire(RequestTypes, Values, [wire_longstring(wire_value(T, V)) | Acc])
+zipwith_wire([T1, T2], [V1, V2]) ->
+  [wire_longstring(wire_value(T1, V1)), wire_longstring(wire_value(T2, V2))]
+;
+zipwith_wire([T1, T2, T3], [V1, V2, V3]) ->
+  [
+    wire_longstring(wire_value(T1, V1)), wire_longstring(wire_value(T2, V2)),
+    wire_longstring(wire_value(T3, V3))
+  ]
+;
+zipwith_wire([T1, T2, T3, T4], [V1, V2, V3, V4]) ->
+  [
+    wire_longstring(wire_value(T1, V1)), wire_longstring(wire_value(T2, V2)),
+    wire_longstring(wire_value(T3, V3)), wire_longstring(wire_value(T4, V4))
+  ]
+;
+zipwith_wire([T1, T2, T3, T4 | T], [V1, V2, V3, V4 | V]) ->
+  [
+    wire_longstring(wire_value(T1, V1)), wire_longstring(wire_value(T2, V2)),
+    wire_longstring(wire_value(T3, V3)), wire_longstring(wire_value(T4, V4))
+    |zipwith_wire(T, V)
+  ]
 .
 
+%%------------------------------------------------------------------------------
+wire_batch(Id, ListOfArgs, Consistency, RequestTypes) ->
+  Head = <<
+     1:?T_UINT8 % kind == 'prepared query'
+    ,(size(Id)):?T_UINT16
+    ,Id/binary
+    ,(length(RequestTypes)):?T_UINT16
+  >>
+  ,do_wire_batch(Head, ListOfArgs, Consistency, RequestTypes)
+.
+do_wire_batch(Head, [Args | ListOfArgs], Consistency, RequestTypes) ->
+  [
+     Head
+    ,zipwith_wire(RequestTypes, Args)
+    |do_wire_batch(Head, ListOfArgs, Consistency, RequestTypes)
+  ]
+;
+do_wire_batch(_Head, [], Consistency, _RequestTypes) ->
+  [<<
+    Consistency:?T_UINT16
+  >>]
+.
 
 %%------------------------------------------------------------------------------
 % 0x0001    Ascii
