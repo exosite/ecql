@@ -17,6 +17,7 @@
   ,query/4
   ,query_async/4
   ,query_batch/4
+  ,sync/1
 ]).
 
 %% OTP gen_server
@@ -34,9 +35,11 @@
 %% Defines
 -define(TIMEOUT, infinity).
 -define(MAX_PENDING, 100).
+-define(BATCH_SIZE, 4096).
+-define(MAX_PENDING_BATCH, 1).
 -define(ENABLED_PAGING, #paging{flag = 4, page_state = <<>>}).
 -define(DISABLED_PAGING, #paging{flag = 0, page_state = <<>>}).
--define(RESULT_PAGE_SIZE, 1000).
+-define(RESULT_PAGE_SIZE, 5000).
 
 %% Includes
 -include("ecql.hrl").
@@ -56,19 +59,12 @@ query(Id, Cql) ->
   query(Id, Cql, [], ?CL_ONE)
 .
 query(Id, Cql, Args, Consistency) ->
-  do_query(Id, call, query, Cql, Args, Consistency)
+  do_query(Id, query, Cql, Args, Consistency)
 .
-do_query(Id, Method, Function, Cql, Args, Consistency) ->
+do_query(Id, Function, Cql, Args, Consistency) ->
   case prepare_statement(Id, Cql, Args) of
     {ok, Prep} ->
-      case Method of
-        cast ->
-          gen_server:cast(Id, {Function, Prep, Args, Consistency})
-        ;
-        call ->
-          gen_server:call(Id, {Function, Prep, Args, Consistency}, ?TIMEOUT)
-        %~
-      end
+      gen_server:call(Id, {Function, Prep, Args, Consistency}, ?TIMEOUT)
     ;
     Error ->
       Error
@@ -78,24 +74,42 @@ do_query(Id, Method, Function, Cql, Args, Consistency) ->
 
 %%------------------------------------------------------------------------------
 query_async(Id, Cql, Args, Consistency) ->
-  case tick(?MAX_PENDING) of
-      true  -> Method = call
-     ;false -> Method = cast
-  end
-  ,do_query(Id, Method, query, Cql, Args, Consistency)
+  do_query(Id, query_async, Cql, Args, Consistency)
 .
 
 %%------------------------------------------------------------------------------
 query_batch(_, _, [], _) ->
   ok
 ;
-query_batch(Id, Cql, ListOfArgs, Consistency) when length(ListOfArgs) > 4096 ->
-   {ListOfArgs1, ListOfArgs2} = lists:split(4096, ListOfArgs)
-  ,query_batch(Id, Cql, ListOfArgs1, Consistency)
-  ,query_batch(Id, Cql, ListOfArgs2, Consistency)
-;
 query_batch(Id, Cql, ListOfArgs, Consistency) ->
-  do_query(Id, call, query_batch, Cql, ListOfArgs, Consistency)
+  case prepare_statement(Id, Cql, ListOfArgs) of
+    {ok, Prep} ->
+      case do_query_batch(Id, Prep, ListOfArgs, Consistency) of
+        ok ->
+          sync(Id)
+        ;
+        Error ->
+          Error
+
+      end
+    ;
+    Error ->
+      Error
+    %~
+  end
+.
+do_query_batch(Id, Prep, ListOfArgs, Consistency) when length(ListOfArgs) > ?BATCH_SIZE ->
+   {ListOfArgs1, ListOfArgs2} = lists:split(?BATCH_SIZE, ListOfArgs)
+  ,do_query_batch(Id, Prep, ListOfArgs1, Consistency)
+  ,do_query_batch(Id, Prep, ListOfArgs2, Consistency)
+;
+do_query_batch(Id, Prep, ListOfArgs, Consistency) ->
+  gen_server:call(Id, {query_batch_async, Prep, ListOfArgs, Consistency}, ?TIMEOUT)
+.
+
+%%------------------------------------------------------------------------------
+sync(Id) ->
+  gen_server:call(Id, sync, ?TIMEOUT)
 .
 
 %%-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
@@ -123,6 +137,11 @@ handle_call({query, Statement, Args, Consistency}, _From, State0) ->
   ,{ok, Result} = query_all_pages(Statement, Args, Consistency, State1, ?ENABLED_PAGING, [])
   ,{reply, Result, State1#state{laststmt = Statement}}
 ;
+handle_call({query_async, Statement, Args, Consistency}, _From, State0) ->
+   State1 = #state{async_pending = Pending} = wait_async(State0, ?MAX_PENDING)
+  ,execute_query(Statement, Args, Consistency, State1, ?DISABLED_PAGING)
+  ,{reply, ok, State1#state{async_pending = Pending + 1, async_laststmt = Statement}}
+;
 handle_call({prepare, Cql}, _From, State0) ->
    State1 = wait_async(State0)
   ,send_frame(
@@ -137,19 +156,23 @@ handle_call({query_batch, Cql, ListOfArgs, Consistency}, _From, State) ->
   ,execute_batch(Cql, ListOfArgs, Consistency, State1)
   ,{reply, recv_frame(Cql), State1#state{laststmt = Cql}}
 ;
+handle_call({query_batch_async, Cql, ListOfArgs, Consistency}, _From, State) ->
+   State1 = #state{async_pending = Pending} = wait_async(State, ?MAX_PENDING_BATCH)
+  ,execute_batch(Cql, ListOfArgs, Consistency, State1)
+  ,{reply, ok, State1#state{async_pending = Pending + 1, async_laststmt = Cql}}
+;
 handle_call(monitor, {From, _Ref}, State) ->
    Ref = monitor(process, From)
   ,{reply, ok, State#state{monitor_ref = Ref}}
 ;
 handle_call(stop, _From, State) ->
   {stop, normal, ok, State}
+;
+handle_call(sync, _From, State) ->
+  {reply, ok, wait_async(State)}
 .
 
 %%------------------------------------------------------------------------------
-handle_cast({query, Statement, Args, Consistency}, State = #state{async_pending = Pending}) ->
-   execute_query(Statement, Args, Consistency, State, ?DISABLED_PAGING)
-  ,{noreply, State#state{async_pending = Pending + 1, async_laststmt = Statement}}
-;
 handle_cast(terminate ,State) ->
   {stop ,terminated ,State}
 .
@@ -180,10 +203,13 @@ code_change(_ ,State ,_) ->
 %%-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 
 %%------------------------------------------------------------------------------
-wait_async(State = #state{async_pending = 0}) ->
+wait_async(State) ->
+  wait_async(State, 0)
+.
+wait_async(State = #state{async_pending = Pending}, Allowed) when Pending =< Allowed ->
   State
 ;
-wait_async(State = #state{async_pending = Pending}) ->
+wait_async(State = #state{async_pending = Pending}, _Allowed) ->
    receive {frame, ResponseOpCode, ResponseBody} ->
      log(ResponseOpCode, ResponseBody, State)
     ,wait_async(State#state{async_pending = Pending - 1})
@@ -785,27 +811,6 @@ convert_int(<<Value:?T_INT64>>) ->
 ;
 convert_int(<<Value:?T_INT32>>) ->
    Value
-.
-
-%%------------------------------------------------------------------------------
-tick(Max) ->
-   N = case get(ecql_tick) of
-    undefined ->
-      0;
-    X ->
-      X
-    %~
-   end
-  ,case N >= Max of
-    true ->
-       put(ecql_tick, 0)
-      ,true
-    ;
-    false ->
-       put(ecql_tick, N + 1)
-      ,false
-    %~
-   end
 .
 
 %%------------------------------------------------------------------------------

@@ -57,6 +57,7 @@
   ,select_column/2
   ,select_column/3
   ,select_column/4
+  ,sync/0
   ,term_to_bin/1
   ,create_index/3
   ,create_table/2
@@ -252,6 +253,11 @@ select(Cql, Args) ->
 .
 select(Cql, Args ,Consistency) ->
   execute(Cql, Args ,Consistency)
+.
+
+%%------------------------------------------------------------------------------
+sync() ->
+  with_stream_do(sync, [])
 .
 
 %%------------------------------------------------------------------------------
