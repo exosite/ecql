@@ -59,7 +59,10 @@ query(Id, Cql) ->
   query(Id, Cql, [], ?CL_ONE)
 .
 query(Id, Cql, Args, Consistency) ->
-  do_query(Id, query, Cql, Args, Consistency)
+   {Time, Ret} = timer:tc(fun() -> do_query(Id, query, Cql, Args, Consistency) end)
+  ,ecql_log:log("SYNC[~p]: ~s ~1024p~n", [Time, Cql, Args])
+  ,Ret
+
 .
 do_query(Id, Function, Cql, Args, Consistency) ->
   case prepare_statement(Id, Cql, Args) of
@@ -74,7 +77,8 @@ do_query(Id, Function, Cql, Args, Consistency) ->
 
 %%------------------------------------------------------------------------------
 query_async(Id, Cql, Args, Consistency) ->
-  do_query(Id, query_async, Cql, Args, Consistency)
+   ecql_log:log("ASYNC: ~s ~1024p~n", [Cql, Args])
+  ,do_query(Id, query_async, Cql, Args, Consistency)
 .
 
 %%------------------------------------------------------------------------------
@@ -82,7 +86,7 @@ query_batch(_, _, [], _) ->
   ok
 ;
 query_batch(Id, Cql, ListOfArgs, Consistency) ->
-  case prepare_statement(Id, Cql, ListOfArgs) of
+  {Time, Ret} = timer:tc(fun() -> case prepare_statement(Id, Cql, ListOfArgs) of
     {ok, Prep} ->
       case do_query_batch(Id, Prep, ListOfArgs, Consistency) of
         ok ->
@@ -90,13 +94,15 @@ query_batch(Id, Cql, ListOfArgs, Consistency) ->
         ;
         Error ->
           Error
-
+        %~
       end
     ;
     Error ->
       Error
     %~
-  end
+  end end)
+  ,ecql_log:log("BATCH[~p]: ~s~n", [Time, Cql])
+  ,Ret
 .
 do_query_batch(Id, Prep, ListOfArgs, Consistency) when length(ListOfArgs) > ?BATCH_SIZE ->
    {ListOfArgs1, ListOfArgs2} = lists:split(?BATCH_SIZE, ListOfArgs)
@@ -104,7 +110,7 @@ do_query_batch(Id, Prep, ListOfArgs, Consistency) when length(ListOfArgs) > ?BAT
   ,do_query_batch(Id, Prep, ListOfArgs2, Consistency)
 ;
 do_query_batch(Id, Prep, ListOfArgs, Consistency) ->
-  gen_server:call(Id, {query_batch_async, Prep, ListOfArgs, Consistency}, ?TIMEOUT)
+   gen_server:call(Id, {query_batch_async, Prep, ListOfArgs, Consistency}, ?TIMEOUT)
 .
 
 %%------------------------------------------------------------------------------

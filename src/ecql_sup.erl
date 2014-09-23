@@ -42,6 +42,14 @@ init(_) ->
           ,worker
           ,[ecql_cache]
         }
+       ,{
+           ecql_log
+          ,{ecql_log, start_link, []}
+          ,permanent
+          ,600
+          ,worker
+          ,[ecql_log]
+        }
       ]
      }
    }

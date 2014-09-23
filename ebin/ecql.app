@@ -12,6 +12,7 @@
          ecql
         ,ecql_cache
         ,ecql_connection
+        ,ecql_log
         ,ecql_sender
         ,ecql_stream
         ,ecql_sup
@@ -29,7 +30,8 @@
       ]}
       ,{mod ,{ecql ,[]}}
       ,{env, [
-         {user, ""}
+         {log, disabled}
+        ,{user, ""}
         ,{pass, ""}
         ,{host, {127,0,0,1}}
         ,{port, 9042}
