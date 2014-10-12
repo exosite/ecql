@@ -17,6 +17,7 @@
   ,query/4
   ,query_async/4
   ,query_batch/4
+  ,release/1
   ,sync/1
 ]).
 
@@ -114,6 +115,11 @@ do_query_batch(Id, Prep, ListOfArgs, Consistency) ->
 .
 
 %%------------------------------------------------------------------------------
+release(Id) ->
+  gen_server:call(Id, release, ?TIMEOUT)
+.
+
+%%------------------------------------------------------------------------------
 sync(Id) ->
   gen_server:call(Id, sync, ?TIMEOUT)
 .
@@ -170,6 +176,11 @@ handle_call({query_batch_async, Cql, ListOfArgs, Consistency}, _From, State) ->
 handle_call(monitor, {From, _Ref}, State) ->
    Ref = monitor(process, From)
   ,{reply, ok, State#state{monitor_ref = Ref}}
+;
+handle_call(release, {From, _Ref}, State = #state{connection = Conn, monitor_ref = MonitorRef}) ->
+   demonitor(MonitorRef, [flush])
+  ,ok = gen_server:call(Conn, {add_stream, self()}, infinity)
+  ,{reply, ok, State#state{monitor_ref = undefined}}
 ;
 handle_call(stop, _From, State) ->
   {stop, normal, ok, State}

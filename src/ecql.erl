@@ -47,6 +47,7 @@
   ,eval/1
   ,eval_all/1
   ,quote/1
+  ,release/0
   ,select/1
   ,select/2
   ,select/3
@@ -199,6 +200,14 @@ config(Key) ->
 %%------------------------------------------------------------------------------
 config(Key, Value) ->
   gen_server:call(?MODULE, {config, Key, Value}, infinity)
+.
+
+%%------------------------------------------------------------------------------
+release() ->
+  case get(last_ccon) of
+     undefined -> ok
+    ;_ -> with_stream_do(release, [])
+  end
 .
 
 %%------------------------------------------------------------------------------
