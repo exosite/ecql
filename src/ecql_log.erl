@@ -106,10 +106,10 @@ handle_call(stop, _From, State) ->
 .
 
 %%------------------------------------------------------------------------------
-handle_cast({log, Time, Command, Cql, Args} ,State = #state{file = none}) ->
+handle_cast({log, _Time, _Command, _Cql, _Args} ,State = #state{file = none}) ->
   {noreply, State}
 ;
-handle_cast({log, Time, Command, Cql, Args} ,State = #state{slowthreshold = Slow}) when Time < Slow->
+handle_cast({log, Time, _Command, _Cql, _Args} ,State = #state{slowthreshold = Slow}) when Time < Slow->
   {noreply, State}
 ;
 handle_cast({log, Time, Command, Cql, Args} ,State = #state{

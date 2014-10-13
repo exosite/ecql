@@ -72,7 +72,7 @@ do_foldl(Id, Fun, Acc, Prep, Args, Consistency) ->
   ,do_foldl_recv(Id, Fun, Acc, Prep, Args, Consistency)
 .
 do_foldl_recv(Id, Fun, Acc, Prep, Args, Consistency) ->
-  case gen_server:call(Id, {query_receive, Prep}, ?TIMEOUT) of
+  case gen_server:call(Id, query_receive, ?TIMEOUT) of
     {<<>>, {Keys, Rows}} ->
        Fun(Keys, Rows, Acc)
     ;
@@ -176,7 +176,7 @@ stop(Stream) ->
 .
 
 %%------------------------------------------------------------------------------
-handle_call({query_receive, Statement}, _From, State = #state{lastresult = Ret}) ->
+handle_call(query_receive, _From, State = #state{lastresult = Ret}) ->
    {reply, Ret, State#state{lastresult = undefined}}
 ;
 handle_call({query_async, Statement, Args, Consistency}, _From, State0) ->
