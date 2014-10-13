@@ -36,6 +36,15 @@
 -export([
    config/1
   ,config/2
+  ,foldl/3
+  ,foldl/4
+  ,foldl/5
+  ,foldl_page/3
+  ,foldl_page/4
+  ,foldl_page/5
+  ,foreach/2
+  ,foreach/3
+  ,foreach/4
   ,execute/1
   ,execute/2
   ,execute/3
@@ -115,7 +124,7 @@ init_keyspace(Configuration) ->
     ,data_centers(Strategy, Factor)
     ,"} "
    ]
-  ,log(ecql_stream:query(Stream, CQL), query, [Stream, CQL])
+  ,log(init_query(Stream, CQL), query, [Stream, CQL])
   ,ok = ecql_connection:stop(Connection)
 .
 data_centers("SimpleStrategy", Factor) ->
@@ -138,10 +147,13 @@ init_connection(Configuration) ->
    {ok, Connection} = ecql_connection:start_link(Configuration)
   ,Keyspace = proplists:get_value(keyspace, Configuration, "ecql")
   ,lists:foreach(
-     fun(Stream0) -> ecql_stream:query(Stream0, ["USE ", Keyspace]) end
+     fun(Stream0) -> init_query(Stream0, ["USE ", Keyspace]) end
     ,ecql_connection:get_streams(Connection)
    )
   ,Connection
+.
+init_query(Stream, Cql) ->
+  ecql_stream:query(Stream, Cql, [], ?CL_ONE)
 .
 
 %%------------------------------------------------------------------------------
@@ -200,6 +212,58 @@ config(Key) ->
 %%------------------------------------------------------------------------------
 config(Key, Value) ->
   gen_server:call(?MODULE, {config, Key, Value}, infinity)
+.
+
+%%------------------------------------------------------------------------------
+foldl(Fun, Acc, Cql) ->
+  foldl(Fun, Acc, Cql, [], ?CL_DEFAULT)
+.
+
+%%------------------------------------------------------------------------------
+foldl(Fun, Acc, Cql, Args) ->
+  foldl(Fun, Acc, Cql, Args, ?CL_DEFAULT)
+.
+
+%%------------------------------------------------------------------------------
+foldl(Fun, Acc, Cql, Args, Consistency) ->
+  Fun1 = fun(_Keys, Rows, Acc0) ->
+    lists:foldl(Fun, Acc0, Rows)
+  end
+  ,foldl_page(Fun1, Acc, Cql, Args, Consistency)
+.
+
+%%------------------------------------------------------------------------------
+foldl_page(Fun, Acc, Cql) ->
+  foldl_page(Fun, Acc, Cql, [], ?CL_DEFAULT)
+.
+
+%%------------------------------------------------------------------------------
+foldl_page(Fun, Acc, Cql, Args) ->
+  foldl_page(Fun, Acc, Cql, Args, ?CL_DEFAULT)
+.
+
+%%------------------------------------------------------------------------------
+foldl_page(Fun, Acc, Cql, Args, Consistency) ->
+  with_stream_do(foldl, [Fun, Acc, Cql, Args, Consistency])
+.
+
+%%------------------------------------------------------------------------------
+foreach(Fun, Cql) ->
+  foreach(Fun, Cql, [], ?CL_DEFAULT)
+.
+
+%%------------------------------------------------------------------------------
+foreach(Fun, Cql, Args) ->
+  foreach(Fun, Cql, Args, ?CL_DEFAULT)
+.
+
+%%------------------------------------------------------------------------------
+foreach(Fun, Cql, Args, Consistency) ->
+  Fun1 = fun(Row, Acc0) ->
+     Fun(Row)
+    ,Acc0
+  end
+  ,foldl(Fun1, ok, Cql, Args, Consistency)
 .
 
 %%------------------------------------------------------------------------------
@@ -307,7 +371,7 @@ create_index(Indexname, Tablename, Columnname) ->
   with_stream_do(query, [[
      "CREATE INDEX IF NOT EXISTS ", Indexname, " ON ", Tablename
     ," (", Columnname, ");"
-  ]])
+  ], [], ?CL_ONE])
 .
 
 %%------------------------------------------------------------------------------
@@ -316,7 +380,7 @@ create_table(Tablename, TableDef) ->
      "CREATE TABLE IF NOT EXISTS ", Tablename, " ( ", TableDef, " ) WITH "
     ,?COMPACTION
     ,";"
-  ]])
+  ], [], ?CL_ONE])
 .
 
 %%------------------------------------------------------------------------------
@@ -325,7 +389,7 @@ create_table(Tablename, TableDef, Comment) ->
      "CREATE TABLE IF NOT EXISTS ", Tablename, " ( ", TableDef, " ) WITH "
     ,?COMPACTION
     ," AND comment='", Comment, "';"
-  ]])
+  ], [], ?CL_ONE])
 .
 
 %%------------------------------------------------------------------------------

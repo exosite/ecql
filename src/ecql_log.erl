@@ -8,9 +8,11 @@
 
 %% Public API
 -export([
-   log/1
-  ,log/2
+   log/3
+  ,log/4
   ,set_file/1
+  ,set_slowthreshold/1
+  ,set_logprobability/1
 ]).
 
 %% OTP gen_server
@@ -25,6 +27,10 @@
   ,terminate/2
 ]).
 
+%% Records
+-record(state, {file = none, logprobability = 1, slowthreshold = 0, psum = 0}).
+
+
 %%-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 %% Public API
 %%-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
@@ -35,13 +41,23 @@ set_file(Filename) ->
 .
 
 %%------------------------------------------------------------------------------
-log(Format) ->
-  log(Format, [])
+set_logprobability(Frac) ->
+  gen_server:call(?MODULE, {set_logprobability, Frac})
 .
 
 %%------------------------------------------------------------------------------
-log(Format, Args) ->
-  gen_server:cast(?MODULE, {log, Format, Args})
+set_slowthreshold(Frac) ->
+  gen_server:call(?MODULE, {set_slowthreshold, Frac})
+.
+
+%%------------------------------------------------------------------------------
+log(Time, Command, Cql) ->
+  log(Time, Command, Cql, [])
+.
+
+%%------------------------------------------------------------------------------
+log(Time, Command, Cql, Args) ->
+  gen_server:cast(?MODULE, {log, Time, Command, Cql, Args})
 .
 
 %%-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
@@ -63,7 +79,7 @@ init(_) ->
     _ ->
       Fp = none
   end
-  ,{ok, Fp}
+  ,{ok, #state{file = Fp}}
 .
 
 %%------------------------------------------------------------------------------
@@ -72,14 +88,17 @@ stop() ->
 .
 
 %%------------------------------------------------------------------------------
-handle_call({set_file, Filename}, _From, State) ->
-  case State of
-     none -> ok
-    ;Fp -> file:close(Fp)
-  end
+handle_call({set_slowthreshold, Frac}, _From, State) ->
+  {reply, ok, State#state{slowthreshold = Frac}}
+;
+handle_call({set_logprobability, Frac}, _From, State) ->
+  {reply, ok, State#state{logprobability = Frac, psum = 0}}
+;
+handle_call({set_file, Filename}, _From, State = #state{file = Fp}) ->
+   Fp =/= none andalso file:close(Fp)
   ,case file:open(Filename, [binary, delayed_write, append]) of
-     {ok, Fp2} -> {reply, ok, Fp2}
-    ;Other -> {reply, Other, none}
+     {ok, Fp2} -> {reply, ok, State#state{file = Fp2}}
+    ;Other -> {reply, Other, State#state{file = none}}
   end
 ;
 handle_call(stop, _From, State) ->
@@ -87,14 +106,36 @@ handle_call(stop, _From, State) ->
 .
 
 %%------------------------------------------------------------------------------
-handle_cast({log, Format, Args} ,State) ->
-   (State /= none) andalso begin
-     io:format(State ,Format ,Args)
-   end
-  ,{noreply ,State}
+handle_cast({log, Time, Command, Cql, Args} ,State = #state{file = none}) ->
+  {noreply, State}
+;
+handle_cast({log, Time, Command, Cql, Args} ,State = #state{slowthreshold = Slow}) when Time < Slow->
+  {noreply, State}
+;
+handle_cast({log, Time, Command, Cql, Args} ,State = #state{
+  file = Fp, logprobability = Probality, psum = Sum
+}) ->
+  case ((Sum + Probality) >= 1) of
+    true ->
+      io:format(Fp, "~p ~p ~1024p ~1024p~n", [Time, Command, value(Cql), Args])
+     ,{noreply, State#state{psum = Sum + Probality - 1}}
+    ;
+    false ->
+      {noreply, State#state{psum = Sum + Probality}}
+    %~
+  end
 ;
 handle_cast(terminate ,State) ->
   {stop ,terminated ,State}
+.
+value(Cql) when is_tuple(Cql) ->
+  value(element(2, Cql))
+;
+value(Cql) when is_list(Cql) ->
+  iolist_to_binary(Cql)
+;
+value(Cql) ->
+  Cql
 .
 
 %%------------------------------------------------------------------------------

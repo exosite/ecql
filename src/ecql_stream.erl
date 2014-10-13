@@ -13,7 +13,7 @@
 
 %% Public API
 -export([
-   query/2
+   foldl/6
   ,query/4
   ,query_async/4
   ,query_batch/4
@@ -36,39 +36,79 @@
 %% Defines
 -define(TIMEOUT, infinity).
 -define(MAX_PENDING, 100).
--define(BATCH_SIZE, 4096).
+-define(BATCH_SIZE, 1000).
 -define(MAX_PENDING_BATCH, 1).
--define(ENABLED_PAGING, #paging{flag = 4, page_state = <<>>}).
--define(DISABLED_PAGING, #paging{flag = 0, page_state = <<>>}).
--define(RESULT_PAGE_SIZE, 5000).
+-define(DISABLED_PAGING, #paging{flag = 0}).
 
 %% Includes
 -include("ecql.hrl").
 
 %% Records
--record(state, {connection, sender, stream, async_pending = 0, monitor_ref, async_laststmt, laststmt}).
+-record(state, {
+   connection, sender, stream, async_pending = 0, monitor_ref
+  ,async_laststmt, async_start, laststmt, lastresult
+}).
 -record(metadata, {flags, columnspecs, paging_state}).
 -record(preparedstatement, {cql, id, metadata, result_metadata}).
--record(paging, {flag, page_state}).
+-record(paging, {flag = 4, page_state = <<>>, page_size = 1000}).
 
 %%-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 %% Public API
 %%-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 
 %%------------------------------------------------------------------------------
-query(Id, Cql) ->
-  query(Id, Cql, [], ?CL_ONE)
-.
-query(Id, Cql, Args, Consistency) ->
-   {Time, Ret} = timer:tc(fun() -> do_query(Id, query, Cql, Args, Consistency) end)
-  ,ecql_log:log("SYNC[~p]: ~s ~1024p~n", [Time, Cql, Args])
-  ,Ret
-
-.
-do_query(Id, Function, Cql, Args, Consistency) ->
+foldl(Id, Fun, Acc, Cql, Args, Consistency) ->
   case prepare_statement(Id, Cql, Args) of
     {ok, Prep} ->
-      gen_server:call(Id, {Function, Prep, Args, Consistency}, ?TIMEOUT)
+      do_foldl(Id, Fun, Acc, Prep, Args, Consistency)
+    ;
+    Error ->
+      Error
+    %~
+  end
+.
+do_foldl(Id, Fun, Acc, Prep, Args, Consistency) ->
+   gen_server:cast(Id, {query_start, <<>>, Prep, Args, Consistency})
+  ,do_foldl_recv(Id, Fun, Acc, Prep, Args, Consistency)
+.
+do_foldl_recv(Id, Fun, Acc, Prep, Args, Consistency) ->
+  case gen_server:call(Id, {query_receive, Prep}, ?TIMEOUT) of
+    {<<>>, {Keys, Rows}} ->
+       Fun(Keys, Rows, Acc)
+    ;
+    {PageState, {Keys, Rows}} when is_binary(PageState) ->
+       gen_server:cast(Id, {query_start, PageState, Prep, Args, Consistency})
+      ,do_foldl_recv(Id, Fun, Fun(Keys, Rows, Acc), Prep, Args, Consistency)
+    ;
+    Other ->
+      Other
+    %~
+  end
+.
+
+%%------------------------------------------------------------------------------
+query(Id, Cql, Args, Consistency) ->
+  case foldl(Id, fun do_query/3, {[], []}, Cql, Args, Consistency) of
+    {Keys, [Rows]} ->
+      {Keys, Rows}
+    ;
+    {Keys, Rows} when is_list(Keys) ->
+      {Keys, lists:flatten(lists:reverse(Rows))}
+    ;
+    Other ->
+      Other
+    %~
+  end
+.
+do_query(Keys, Rows, {_Keys, Rows0}) ->
+  {Keys, [Rows | Rows0]}
+.
+
+%%------------------------------------------------------------------------------
+query_async(Id, Cql, Args, Consistency) ->
+  case prepare_statement(Id, Cql, Args) of
+    {ok, Prep} ->
+      gen_server:call(Id, {query_async, Prep, Args, Consistency}, ?TIMEOUT)
     ;
     Error ->
       Error
@@ -77,17 +117,11 @@ do_query(Id, Function, Cql, Args, Consistency) ->
 .
 
 %%------------------------------------------------------------------------------
-query_async(Id, Cql, Args, Consistency) ->
-   ecql_log:log("ASYNC: ~s ~1024p~n", [Cql, Args])
-  ,do_query(Id, query_async, Cql, Args, Consistency)
-.
-
-%%------------------------------------------------------------------------------
 query_batch(_, _, [], _) ->
   ok
 ;
 query_batch(Id, Cql, ListOfArgs, Consistency) ->
-  {Time, Ret} = timer:tc(fun() -> case prepare_statement(Id, Cql, ListOfArgs) of
+  case prepare_statement(Id, Cql, ListOfArgs) of
     {ok, Prep} ->
       case do_query_batch(Id, Prep, ListOfArgs, Consistency) of
         ok ->
@@ -101,9 +135,7 @@ query_batch(Id, Cql, ListOfArgs, Consistency) ->
     Error ->
       Error
     %~
-  end end)
-  ,ecql_log:log("BATCH[~p]: ~s~n", [Time, Cql])
-  ,Ret
+  end
 .
 do_query_batch(Id, Prep, ListOfArgs, Consistency) when length(ListOfArgs) > ?BATCH_SIZE ->
    {ListOfArgs1, ListOfArgs2} = lists:split(?BATCH_SIZE, ListOfArgs)
@@ -144,15 +176,13 @@ stop(Stream) ->
 .
 
 %%------------------------------------------------------------------------------
-handle_call({query, Statement, Args, Consistency}, _From, State0) ->
-   State1 = wait_async(State0)
-  ,{ok, Result} = query_all_pages(Statement, Args, Consistency, State1, ?ENABLED_PAGING, [])
-  ,{reply, Result, State1#state{laststmt = Statement}}
+handle_call({query_receive, Statement}, _From, State = #state{lastresult = Ret}) ->
+   {reply, Ret, State#state{lastresult = undefined}}
 ;
 handle_call({query_async, Statement, Args, Consistency}, _From, State0) ->
    State1 = #state{async_pending = Pending} = wait_async(State0, ?MAX_PENDING)
   ,execute_query(Statement, Args, Consistency, State1, ?DISABLED_PAGING)
-  ,{reply, ok, State1#state{async_pending = Pending + 1, async_laststmt = Statement}}
+  ,{reply, ok, State1#state{async_pending = Pending + 1, async_laststmt = Statement, async_start = now()}}
 ;
 handle_call({prepare, Cql}, _From, State0) ->
    State1 = wait_async(State0)
@@ -163,15 +193,15 @@ handle_call({prepare, Cql}, _From, State0) ->
   )
   ,{reply, recv_frame(Cql), State1}
 ;
-handle_call({query_batch, Cql, ListOfArgs, Consistency}, _From, State) ->
+handle_call({query_batch, Statement, ListOfArgs, Consistency}, _From, State) ->
    State1 = wait_async(State)
-  ,execute_batch(Cql, ListOfArgs, Consistency, State1)
-  ,{reply, recv_frame(Cql), State1#state{laststmt = Cql}}
+  ,execute_batch(Statement, ListOfArgs, Consistency, State1)
+  ,{reply, recv_frame(Statement), State1#state{async_laststmt = Statement}}
 ;
 handle_call({query_batch_async, Cql, ListOfArgs, Consistency}, _From, State) ->
    State1 = #state{async_pending = Pending} = wait_async(State, ?MAX_PENDING_BATCH)
   ,execute_batch(Cql, ListOfArgs, Consistency, State1)
-  ,{reply, ok, State1#state{async_pending = Pending + 1, async_laststmt = Cql}}
+  ,{reply, ok, State1#state{async_pending = Pending + 1, async_laststmt = Cql, async_start = now()}}
 ;
 handle_call(monitor, {From, _Ref}, State) ->
    Ref = monitor(process, From)
@@ -190,6 +220,15 @@ handle_call(sync, _From, State) ->
 .
 
 %%------------------------------------------------------------------------------
+handle_cast({query_start, PageState, Statement, Args, Consistency} ,State0) ->
+   State = wait_async(State0)
+  ,{Time, Ret} = timer:tc(fun() ->
+     execute_query(Statement, Args, Consistency, State, #paging{page_state = PageState})
+    ,recv_frame(Statement)
+  end)
+  ,ecql_log:log(Time, query, Statement, Args)
+  ,{noreply, State#state{laststmt = Statement, lastresult = Ret}}
+;
 handle_cast(terminate ,State) ->
   {stop ,terminated ,State}
 .
@@ -234,69 +273,22 @@ wait_async(State = #state{async_pending = Pending}, _Allowed) ->
 .
 
 %%------------------------------------------------------------------------------
-log(?OP_ERROR, Body, State) ->
-  do_log(handle_response(?OP_ERROR, Body), State)
-;
-log(_ResponseOpCode, _ResponseBody, _State) ->
-  ok
+log(ResponseOpCode, Body, State = #state{async_laststmt = Cql, async_start = Begin}) ->
+   ecql_log:log(timer:now_diff(now(), Begin), async, Cql)
+  ,case ResponseOpCode of
+    ?OP_ERROR ->
+      do_log(handle_response(?OP_ERROR, Body), State)
+    ;
+    _ ->
+      ok
+    %~
+  end
 .
 do_log({error, Code, Message}, State) ->
   error_logger:error_msg("query_async: failed: {error, ~p, ~s} state: ~p~n", [Code, Message, State])
 ;
 do_log(Error, State) ->
   error_logger:error_msg("query_async: failed: ~p sate: ~p~n", [Error, State])
-.
-
-%%------------------------------------------------------------------------------
-%%  Function:
-%%    query_all_pages(Statement, Args, Quorum, State, Paging, Rows) ->
-%%      {ok, Result}
-%%
-%%  Description:
-%%    Send one or multiple queries to Cassandra to retrieve the Result of the
-%%    given Cql.
-%%------------------------------------------------------------------------------
-query_all_pages(Statement, Args, Consistency, State, Paging1, Rows) ->
-   execute_query(Statement, Args, Consistency, State, Paging1)
-  ,RecvResult = recv_frame(Statement)
-  ,case has_more_pages(RecvResult, Paging1, Rows) of
-    {no, Result} ->
-      {ok, Result}
-    ;
-    {yes, Paging2, RecvR} ->
-      query_all_pages(Statement, Args, Consistency, State, Paging2, Rows ++ RecvR)
-  end
-.
-
-%%------------------------------------------------------------------------------
-%%  Function:
-%%    has_more_pages(Result) -> {no, Result} | yes
-%%
-%%  Description:
-%%    According to the given Result, check if it is necessary to send another
-%%    query, i.e., we received paging_state from Cassandra where it would be
-%%    used in the next query.
-%%------------------------------------------------------------------------------
-has_more_pages(ok, _, _) ->
-  {no, ok}
-;
-has_more_pages(Result, Paging1, AccRows) ->
-  case erlang:element(1, Result) of
-    <<>> ->
-       {<<>>, {Keys, Rows}} = Result
-      ,{no, {Keys, AccRows ++ Rows}}
-    ;
-    ok ->
-      {no, Result}
-    ;
-    error ->
-      {no, Result}
-    ;
-    _ ->
-       {RecvPGS, {_RecvK, RecvR}} = Result
-      ,Paging2 = Paging1#paging{page_state = RecvPGS}
-      ,{yes, Paging2, RecvR}
-  end
 .
 
 %%------------------------------------------------------------------------------
@@ -357,9 +349,9 @@ execute_batch(
 .
 
 %%------------------------------------------------------------------------------
-get_page_size(#paging{flag = Flag}) ->
+get_page_size(#paging{flag = Flag, page_size = PageSize}) ->
   if (Flag band 4) == 4 ->
-    <<?RESULT_PAGE_SIZE:32>>
+    <<PageSize:32>>
   ;
   true ->
     <<>>
