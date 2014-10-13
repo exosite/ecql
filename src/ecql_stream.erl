@@ -207,7 +207,7 @@ handle_call(monitor, {From, _Ref}, State) ->
    Ref = monitor(process, From)
   ,{reply, ok, State#state{monitor_ref = Ref}}
 ;
-handle_call(release, {From, _Ref}, State = #state{connection = Conn, monitor_ref = MonitorRef}) ->
+handle_call(release, {_From, _Ref}, State = #state{connection = Conn, monitor_ref = MonitorRef}) ->
    demonitor(MonitorRef, [flush])
   ,ok = gen_server:call(Conn, {add_stream, self()}, infinity)
   ,{reply, ok, State#state{monitor_ref = undefined}}
