@@ -93,7 +93,7 @@ query(Id, Cql, Args, Consistency) ->
       {Keys, Rows}
     ;
     {Keys, Rows} when is_list(Keys) ->
-      {Keys, lists:flatten(lists:reverse(Rows))}
+      {Keys, lists:append(lists:reverse(Rows))}
     ;
     Other ->
       Other
