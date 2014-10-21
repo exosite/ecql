@@ -274,7 +274,7 @@ wait_async(State = #state{async_pending = Pending}, _Allowed) ->
 
 %%------------------------------------------------------------------------------
 log(ResponseOpCode, Body, State = #state{async_laststmt = Cql, async_start = Begin}) ->
-   ecql_log:log(timer:now_diff(now(), Begin), async, Cql)
+   ecql_log:log(timer:now_diff(now(), Begin), async, Cql, [])
   ,case ResponseOpCode of
     ?OP_ERROR ->
       do_log(handle_response(?OP_ERROR, Body), State)

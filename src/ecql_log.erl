@@ -8,8 +8,7 @@
 
 %% Public API
 -export([
-   log/3
-  ,log/4
+   log/4
   ,set_file/1
   ,set_slowthreshold/1
   ,set_logprobability/1
@@ -51,13 +50,8 @@ set_slowthreshold(Frac) ->
 .
 
 %%------------------------------------------------------------------------------
-log(Time, Command, Cql) ->
-  log(Time, Command, Cql, [])
-.
-
-%%------------------------------------------------------------------------------
 log(Time, Command, Cql, Args) ->
-  gen_server:cast(?MODULE, {log, Time, Command, Cql, Args})
+  gen_server:cast(?MODULE, {log, self(), Time, Command, Cql, Args})
 .
 
 %%-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
@@ -106,18 +100,18 @@ handle_call(stop, _From, State) ->
 .
 
 %%------------------------------------------------------------------------------
-handle_cast({log, _Time, _Command, _Cql, _Args} ,State = #state{file = none}) ->
+handle_cast({log, _Ref, _Time, _Command, _Cql, _Args} ,State = #state{file = none}) ->
   {noreply, State}
 ;
-handle_cast({log, Time, _Command, _Cql, _Args} ,State = #state{slowthreshold = Slow}) when Time < Slow->
+handle_cast({log, _Ref, Time, _Command, _Cql, _Args} ,State = #state{slowthreshold = Slow}) when Time < Slow->
   {noreply, State}
 ;
-handle_cast({log, Time, Command, Cql, Args} ,State = #state{
+handle_cast({log, Ref, Time, Command, Cql, Args} ,State = #state{
   file = Fp, logprobability = Probality, psum = Sum
 }) ->
   case ((Sum + Probality) >= 1) of
     true ->
-      io:format(Fp, "~p ~p ~1024p ~1024p~n", [Time, Command, value(Cql), Args])
+      io:format(Fp, "~p: ~p ~p ~1024p ~1024p~n", [Ref, Time, Command, value(Cql), Args])
      ,{noreply, State#state{psum = Sum + Probality - 1}}
     ;
     false ->
