@@ -269,8 +269,14 @@ foreach(Fun, Cql, Args, Consistency) ->
 %%------------------------------------------------------------------------------
 release() ->
   case get(last_ccon) of
-     undefined -> ok
-    ;_ -> with_stream_do(release, [])
+     undefined ->
+      ok
+    ;
+    _ ->
+       Ret = with_stream_do(release, [])
+      ,erase(last_ccon)
+      ,Ret
+    %~
   end
 .
 
