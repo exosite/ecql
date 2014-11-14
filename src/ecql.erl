@@ -10,13 +10,14 @@
 %% Includes
 -include("ecql.hrl").
 
--record(state, {clients, counter = 0, settings}).
+-record(state, {clients = {}, counter = 0, settings, waiting = [], dirty = false}).
 
 -define(DUPLICATE_TABLE, 9216).
 -define(DUPLICATE_INDEX, 8704).
 % Compare default settings with CASSANDRA-5727
 -define(COMPACTION, "compaction = {'class': 'LeveledCompactionStrategy', 'sstable_size_in_mb': 160}").
 -define(CL_DEFAULT, ?CL_LOCAL_QUORUM).
+-define(RECONNECT_INTERVALL, 5000).
 
 %% OTP application
 -export([start/2, stop/1]).
@@ -100,33 +101,53 @@ start_link() ->
 
 %%------------------------------------------------------------------------------
 init(_) ->
-   % Sleeping to calm down fast restarts on crash
-   timer:sleep(1000)
-  ,ecql_statements = ets:new(ecql_statements, [named_table, public, {read_concurrency, true}, {keypos, 2}])
-  ,Configuration = application:get_all_env()
-  ,init_keyspace(Configuration)
-  ,Count = proplists:get_value(connections, Configuration, 4)
-  ,Connections = list_to_tuple(init_connection_pool(Count, Configuration))
-  ,{ok, #state{clients = Connections, settings = Configuration}}
+   process_flag(trap_exit, true)
+  ,gen_server:cast(?MODULE, init)
+  ,{ok, #state{}}
 .
-init_keyspace(Configuration) ->
-   {ok, Connection} = ecql_connection:start_link(Configuration)
-  ,Keyspace = proplists:get_value(keyspace, Configuration, "ecql")
-  ,Factor = proplists:get_value(replication_factor, Configuration, 2)
-  ,Stream = ecql_connection:get_stream(Connection)
-  ,Strategy = proplists:get_value(replication_strategy, Configuration, "SimpleStrategy")
-  ,CQL = [
-     "CREATE KEYSPACE IF NOT EXISTS "
-    ,Keyspace
-    ," with REPLICATION = {'class':'"
-    ,Strategy
-    ,"'"
-    ,data_centers(Strategy, Factor)
-    ,"} "
-   ]
-  ,log(init_query(Stream, CQL), query, [Stream, CQL])
-  ,ok = ecql_connection:stop(Connection)
+do_init(State) ->
+   Configuration = application:get_all_env()
+  ,Hosts = proplists:get_value(hosts, Configuration, [])
+  ,Configuration1 = do_init_keyspace(Hosts ,Configuration)
+  ,Connections = repair_connection_pool({}, Configuration1)
+  ,State#state{settings = Configuration1, clients = Connections}
 .
+do_init_keyspace([] ,Configuration) ->
+  receive {config, Key, Value} ->
+     Configuration1 = lists:keystore(Key, 1, Configuration, {Key, Value})
+  after 1000 ->
+     Configuration1 = Configuration
+  end
+  ,do_init_keyspace(proplists:get_value(hosts, Configuration1, []) ,Configuration1)
+;
+do_init_keyspace([Host | Hosts] ,Configuration) ->
+  case ecql_connection:start_link(Host ,Configuration) of
+    {ok, Connection} ->
+       Keyspace = proplists:get_value(keyspace, Configuration, "ecql")
+      ,Factor = proplists:get_value(replication_factor, Configuration, 2)
+      ,Stream = ecql_connection:get_stream(Connection)
+      ,Strategy = proplists:get_value(replication_strategy, Configuration, "SimpleStrategy")
+      ,CQL = [
+         "CREATE KEYSPACE IF NOT EXISTS "
+        ,Keyspace
+        ," with REPLICATION = {'class':'"
+        ,Strategy
+        ,"'"
+        ,data_centers(Strategy, Factor)
+        ,"} "
+       ]
+      ,log(init_query(Stream, CQL), query, [Stream, CQL])
+      ,ok = ecql_connection:stop(Connection)
+      ,Configuration
+    ;
+    Error ->
+       error_logger:error_msg("ecql: Failed connecting to: ~p: ~p~n", [Host, Error])
+      ,do_init_keyspace(Hosts ,Configuration)
+    %~
+  end
+.
+
+%%------------------------------------------------------------------------------
 data_centers("SimpleStrategy", Factor) ->
   [", 'replication_factor':", integer_to_list(Factor)]
 ;
@@ -137,23 +158,73 @@ data_centers("NetworkTopologyStrategy" = S, [{Name, Factor} | Rest]) ->
   [", '", Name, "':", integer_to_list(Factor) | data_centers(S, Rest)]
 .
 
-init_connection_pool(0, _) ->
-  []
+%%------------------------------------------------------------------------------
+repair_connection_pool(OldPool, Configuration) ->
+   Count = proplists:get_value(connections_per_host, Configuration, 4)
+  ,Hosts = proplists:get_value(hosts, Configuration, [])
+  ,list_to_tuple(add_hosts(Hosts, Count, [], tuple_to_list(OldPool), Configuration))
+.
+
+%%------------------------------------------------------------------------------
+add_hosts([], _Count, NewPool, OldPool, _Configuration) ->
+  [ecql_connection:stop(OldConn) ||
+     {_, OldConn} <- OldPool
+    ,erlang:is_pid(OldConn)
+    ,erlang:is_process_alive(OldConn)
+  ]
+  ,NewPool
 ;
-init_connection_pool(N, Configuration) ->
-  [init_connection(Configuration)  | init_connection_pool(N-1, Configuration)]
+add_hosts([Host | Hosts], Count, NewPool, OldPool0, Configuration) ->
+   {OldConnPool0, OldPool} = lists:partition(fun({OldHost, _}) -> OldHost == Host end, OldPool0)
+  ,OldConnPool = [OldConn ||
+     {OldHost, OldConn} <- OldConnPool0
+    ,OldHost == Host
+    ,erlang:is_pid(OldConn)
+    ,erlang:is_process_alive(OldConn)
+  ]
+  ,add_hosts(
+     Hosts
+    ,Count
+    ,add_host(Host, Count, NewPool, OldConnPool, Configuration)
+    ,OldPool
+    ,Configuration
+  )
 .
-init_connection(Configuration) ->
-   {ok, Connection} = ecql_connection:start_link(Configuration)
-  ,Keyspace = proplists:get_value(keyspace, Configuration, "ecql")
-  ,lists:foreach(
-     fun(Stream0) -> init_query(Stream0, ["USE ", Keyspace]) end
-    ,ecql_connection:get_streams(Connection)
-   )
-  ,Connection
+
+%%------------------------------------------------------------------------------
+add_host(_Host, 0, NewPool, OldConnPool, _Configuration) ->
+   [ecql_connection:stop(OldConn) || {_, OldConn} <- OldConnPool]
+  ,NewPool
+;
+add_host(Host, N, NewPool0, [], Configuration) ->
+   NewPool = add_connection(Host, Configuration, NewPool0)
+  ,add_host(Host, N - 1, NewPool, [], Configuration)
+;
+add_host(Host, N, NewPool, [OldConn | OldConnPool], Configuration) ->
+   add_host(Host, N - 1, [{Host, OldConn} | NewPool], OldConnPool, Configuration)
 .
-init_query(Stream, Cql) ->
-  ecql_stream:query(Stream, Cql, [], ?CL_ONE)
+
+%%------------------------------------------------------------------------------
+add_connection(Host, Configuration, NewPool) ->
+  case ecql_connection:start_link(Host, Configuration) of
+    {ok, Connection} ->
+       Keyspace = proplists:get_value(keyspace, Configuration, "ecql")
+      ,lists:foreach(
+         fun(Pid) -> init_query({Host, Pid}, ["USE ", Keyspace]) end
+        ,ecql_connection:get_streams(Connection)
+      )
+      ,[{Host, Connection} | NewPool]
+    ;
+    Error ->
+       Error
+      ,NewPool
+    %~
+  end
+.
+
+%%------------------------------------------------------------------------------
+init_query(Id, Cql) ->
+  ecql_stream:query(Id, Cql, [], ?CL_ONE)
 .
 
 %%------------------------------------------------------------------------------
@@ -171,23 +242,59 @@ handle_call({config, Key}, _From, State = #state{settings = Configuration}) ->
 ;
 handle_call({config, Key, Value}, _From, S = #state{settings = Configuration}) ->
    S1 = S#state{settings = lists:keystore(Key, 1, Configuration, {Key, Value})}
-  ,{reply, ok, S1}
+  ,self() ! repair
+  ,{reply, ok, S1#state{dirty = true}}
+;
+handle_call(connection, From, State = #state{clients = {}, waiting = Waiting}) ->
+   {noreply, State#state{waiting = [From | Waiting]}}
 ;
 handle_call(connection, _From, State = #state{clients = Connections, counter = Counter}) ->
    ConnectionId = (Counter rem size(Connections)) + 1
-  ,{reply, element(ConnectionId, Connections), State#state{counter=Counter+1}}
+  ,{_, Connection} = element(ConnectionId, Connections)
+  ,{reply, Connection, State#state{counter=Counter+1}}
 .
 
 %%------------------------------------------------------------------------------
+handle_cast(init ,State) ->
+  {noreply ,do_init(State)}
+;
 handle_cast(terminate ,State) ->
   {stop ,terminated ,State}
 .
 
 %%------------------------------------------------------------------------------
+handle_info({'EXIT', _Pid, normal}, State) ->
+   {noreply, State}
+;
+handle_info({'EXIT', Pid, Reason}, State = #state{dirty = Dirty, clients = Connections0}) ->
+   error_logger:error_msg("ecql: ~p crashed because ~p~n", [Pid, Reason])
+  ,Dirty orelse erlang:send_after(?RECONNECT_INTERVALL, self(), repair)
+  ,Connections = [Conn || Conn = {_, ConnPid} <- tuple_to_list(Connections0), ConnPid =/= Pid]
+  ,{noreply, State#state{dirty = true, clients = list_to_tuple(Connections)}}
+;
+handle_info(repair, State = #state{settings = Configuration, clients = Connections0, waiting = Waiting}) ->
+   Connections = repair_connection_pool(Connections0, Configuration)
+  ,Waiting1 = reply(Waiting, Connections, 1)
+  ,{noreply, State#state{dirty = false, clients = Connections, waiting = Waiting1}}
+;
 handle_info(timeout, State) ->
    % Who timed out?
-   error_logger:error_msg("ecql_connection: Timeout occured~n")
+   error_logger:error_msg("ecql: Timeout occured~n")
   ,{noreply, State}
+.
+
+%%------------------------------------------------------------------------------
+reply([], _, _) ->
+  []
+;
+reply(Waiting, {}, _) ->
+  Waiting
+;
+reply([Client | Clients], Connections, Counter) ->
+   ConnectionId = (Counter rem size(Connections)) + 1
+  ,{_, Connection} = element(ConnectionId, Connections)
+  ,gen_server:reply(Client, Connection)
+  ,reply(Clients, Connections, Counter + 1)
 .
 
 %%------------------------------------------------------------------------------

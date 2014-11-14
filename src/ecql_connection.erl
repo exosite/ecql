@@ -15,7 +15,7 @@
 %% OTP gen_server
 -export([
    init/1
-  ,start_link/1
+  ,start_link/2
   ,stop/1
   ,handle_call/3
   ,handle_cast/2
@@ -28,7 +28,8 @@
 -include("ecql.hrl").
 
 %% Records
--record(state, {socket, pool, available, counter, sender, waiting = []}).
+-record(state, {socket, pool, available, counter, sender, waiting = [], host}).
+-record(preparedstatement, {cql, host, id, metadata, result_metadata}).
 
 %%-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 %% Public API
@@ -36,9 +37,9 @@
 
 %%------------------------------------------------------------------------------
 get_stream(Connection) ->
-   Stream = gen_server:call(Connection, get_stream, infinity)
-  ,ok = gen_server:call(Stream, monitor, infinity)
-  ,Stream
+   {Host, Pid} = gen_server:call(Connection, get_stream, infinity)
+  ,ok = gen_server:call(Pid, monitor, infinity)
+  ,{Host, Pid}
 .
 
 %%------------------------------------------------------------------------------
@@ -51,16 +52,14 @@ get_streams(Connection) ->
 %%-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 
 %%------------------------------------------------------------------------------
-start_link(Configuration) ->
-  gen_server:start_link(?MODULE, Configuration ,[])
+start_link(Host, Configuration) ->
+   gen_server:start_link(?MODULE, {Host, Configuration}, [])
 .
 
 %%------------------------------------------------------------------------------
-init(Configuration) ->
+init({{Host, Port}, Configuration}) ->
    Buff = 1024*1024
   ,Opts = [{active, true}, {mode, binary}, {recbuf, Buff}, {sndbuf, Buff}]
-  ,Host = proplists:get_value(host, Configuration, {127,0,0,1})
-  ,Port = proplists:get_value(port, Configuration, 9042)
   ,{ok, Socket} = gen_tcp:connect(Host, Port, Opts, 2000)
   ,ok = gen_tcp:send(Socket, frame_startup())
   ,User = proplists:get_value(user, Configuration, "")
@@ -69,7 +68,14 @@ init(Configuration) ->
   ,PoolSize = proplists:get_value(streams_per_connection, Configuration, 25)
   ,{ok, Sender} = ecql_sender:start_link(Socket)
   ,Pool = init_pool(PoolSize, Sender)
-  ,{ok, #state{socket=Socket, pool=list_to_tuple(Pool), available=Pool, counter=0, sender = Sender}}
+  ,{ok, #state{
+     socket=Socket
+    ,pool = list_to_tuple(Pool)
+    ,available = Pool
+    ,counter = 0
+    ,sender = Sender
+    ,host = {Host, Port}
+  }}
 .
 init_pool(0, _Sender) ->
   []
@@ -84,39 +90,48 @@ init_stream(N, Sender) ->
 
 %%------------------------------------------------------------------------------
 stop(Connection) ->
-  gen_server:call(Connection, stop)
+  gen_server:cast(Connection, stop)
 .
 
 %%------------------------------------------------------------------------------
 handle_call(get_stream, Client, State = #state{available = [], waiting = Waiting, counter = Counter}) ->
    {noreply, State#state{waiting = [Client | Waiting], counter = Counter + 1}}
 ;
-handle_call(get_stream, _From, State = #state{available = Streams, counter = Counter}) ->
+handle_call(get_stream, _From, State = #state{available = Streams, counter = Counter, host = Host}) ->
    [Stream | NewAvailable] = Streams
-  ,{reply, Stream, State#state{available = NewAvailable, counter = Counter + 1}}
-;
-handle_call({add_stream, Stream}, _From, State = #state{available = Streams, waiting = []}) ->
-  {reply, ok, State#state{available= [Stream | Streams]}}
-;
-handle_call({add_stream, Stream}, _From, State = #state{waiting = [Client | Rest]}) ->
-   gen_server:reply(Client, Stream)
-  ,{reply, ok, State#state{waiting = Rest}}
+  ,{reply, {Host, Stream}, State#state{available = NewAvailable, counter = Counter + 1}}
 ;
 handle_call(get_streams, _From, State = #state{pool=Pool}) ->
   {reply, Pool, State}
-;
-handle_call(stop, _From, State = #state{socket=Socket, pool=Pool}) ->
-   gen_tcp:close(Socket)
-  ,[ecql_stream:stop(Stream) || Stream <- tuple_to_list(Pool)]
-  ,{stop, normal, ok, State}
 .
 
 %%------------------------------------------------------------------------------
+handle_cast(stop, State = #state{pool = PoolTuple}) ->
+   Pool = tuple_to_list(PoolTuple)
+  ,[gen_server:cast(Stream, stop) || Stream <- Pool]
+  ,erlang:send_after(10000, self(), stopnow)
+  ,{noreply, State}
+;
 handle_cast(terminate ,State) ->
   {stop ,terminated ,State}
 .
 
 %%------------------------------------------------------------------------------
+handle_info({add_stream, Stream}, State = #state{available = Streams, waiting = []}) ->
+  {noreply, State#state{available = [Stream | Streams]}}
+;
+handle_info({add_stream, Stream}, State = #state{waiting = [Client | Rest], host = Host}) ->
+   gen_server:reply(Client, {Host, Stream})
+  ,{noreply, State#state{waiting = Rest}}
+;
+handle_info(stopnow, State = #state{socket = Socket}) ->
+   gen_tcp:close(Socket)
+  ,{stop, normal, State}
+;
+handle_info({tcp_closed, _Socket}, State = #state{host = Host}) ->
+   ets:match_delete(ecql_statements, #preparedstatement{host = Host, _ = '_'})
+  ,{stop, tcp_closed, State}
+;
 handle_info({tcp, _Socket, Data}, State = #state{pool = Pool}) ->
    handle_data(Data, Pool)
   ,{noreply, State}
@@ -128,8 +143,8 @@ handle_info(timeout, State) ->
 .
 
 %%------------------------------------------------------------------------------
-terminate(_Reason, State) ->
-  {shutdown, State}
+terminate(Reason, State) ->
+  {Reason, State}
 .
 
 %%------------------------------------------------------------------------------

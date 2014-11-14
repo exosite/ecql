@@ -1,2 +1,3 @@
 *.beam
 .eunit/*
+/ebin/ecql.app

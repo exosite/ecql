@@ -27,12 +27,12 @@ init(_) ->
        {one_for_one, MaxRestart, MaxTime}
       ,[
         {
-           ecql
-          ,{ecql, start_link, []}
+           ecql_etsman
+          ,{ecql_etsman, start_link, []}
           ,permanent
           ,600
           ,worker
-          ,[ecql]
+          ,[ecql_etsman]
         }
        ,{
            ecql_cache
@@ -41,6 +41,14 @@ init(_) ->
           ,600
           ,worker
           ,[ecql_cache]
+        }
+       ,{
+           ecql
+          ,{ecql, start_link, []}
+          ,permanent
+          ,600
+          ,worker
+          ,[ecql]
         }
        ,{
            ecql_log

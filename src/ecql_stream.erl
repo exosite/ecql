@@ -25,7 +25,6 @@
 -export([
    init/1
   ,start_link/3
-  ,stop/1
   ,handle_call/3
   ,handle_cast/2
   ,handle_info/2
@@ -49,7 +48,7 @@
   ,async_laststmt, async_start, laststmt, lastresult
 }).
 -record(metadata, {flags, columnspecs, paging_state}).
--record(preparedstatement, {cql, id, metadata, result_metadata}).
+-record(preparedstatement, {cql, host, id, metadata, result_metadata}).
 -record(paging, {flag = 4, page_state = <<>>, page_size = 1000}).
 
 %%-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
@@ -67,17 +66,17 @@ foldl(Id, Fun, Acc, Cql, Args, Consistency) ->
     %~
   end
 .
-do_foldl(Id, Fun, Acc, Prep, Args, Consistency) ->
-   gen_server:cast(Id, {query_start, <<>>, Prep, Args, Consistency})
+do_foldl({_, Pid} = Id, Fun, Acc, Prep, Args, Consistency) ->
+   gen_server:cast(Pid, {query_start, <<>>, Prep, Args, Consistency})
   ,do_foldl_recv(Id, Fun, Acc, Prep, Args, Consistency)
 .
-do_foldl_recv(Id, Fun, Acc, Prep, Args, Consistency) ->
-  case gen_server:call(Id, query_receive, ?TIMEOUT) of
+do_foldl_recv({_, Pid} = Id, Fun, Acc, Prep, Args, Consistency) ->
+  case gen_server:call(Pid, query_receive, ?TIMEOUT) of
     {<<>>, {Keys, Rows}} ->
        Fun(Keys, Rows, Acc)
     ;
     {PageState, {Keys, Rows}} when is_binary(PageState) ->
-       gen_server:cast(Id, {query_start, PageState, Prep, Args, Consistency})
+       gen_server:cast(Pid, {query_start, PageState, Prep, Args, Consistency})
       ,do_foldl_recv(Id, Fun, Fun(Keys, Rows, Acc), Prep, Args, Consistency)
     ;
     Other ->
@@ -105,10 +104,10 @@ do_query(Keys, Rows, {_Keys, Rows0}) ->
 .
 
 %%------------------------------------------------------------------------------
-query_async(Id, Cql, Args, Consistency) ->
+query_async({_, Pid} = Id, Cql, Args, Consistency) ->
   case prepare_statement(Id, Cql, Args) of
     {ok, Prep} ->
-      gen_server:call(Id, {query_async, Prep, Args, Consistency}, ?TIMEOUT)
+      gen_server:call(Pid, {query_async, Prep, Args, Consistency}, ?TIMEOUT)
     ;
     Error ->
       Error
@@ -142,18 +141,18 @@ do_query_batch(Id, Prep, ListOfArgs, Consistency) when length(ListOfArgs) > ?BAT
   ,do_query_batch(Id, Prep, ListOfArgs1, Consistency)
   ,do_query_batch(Id, Prep, ListOfArgs2, Consistency)
 ;
-do_query_batch(Id, Prep, ListOfArgs, Consistency) ->
-   gen_server:call(Id, {query_batch_async, Prep, ListOfArgs, Consistency}, ?TIMEOUT)
+do_query_batch({_, Pid}, Prep, ListOfArgs, Consistency) ->
+   gen_server:call(Pid, {query_batch_async, Prep, ListOfArgs, Consistency}, ?TIMEOUT)
 .
 
 %%------------------------------------------------------------------------------
-release(Id) ->
-  gen_server:call(Id, release, ?TIMEOUT)
+release({_, Pid}) ->
+  gen_server:call(Pid, release, ?TIMEOUT)
 .
 
 %%------------------------------------------------------------------------------
-sync(Id) ->
-  gen_server:call(Id, sync, ?TIMEOUT)
+sync({_, Pid}) ->
+  gen_server:call(Pid, sync, ?TIMEOUT)
 .
 
 %%-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
@@ -168,11 +167,6 @@ start_link(Connection, Sender, StreamId) ->
 %%------------------------------------------------------------------------------
 init({Connection, Sender, StreamId}) ->
   {ok, #state{connection = Connection, sender = Sender, stream = StreamId}}
-.
-
-%%------------------------------------------------------------------------------
-stop(Stream) ->
-  gen_server:call(Stream, stop, ?TIMEOUT)
 .
 
 %%------------------------------------------------------------------------------
@@ -212,11 +206,8 @@ handle_call(release, _From, State = #state{monitor_ref = undefined}) ->
 ;
 handle_call(release, _From, State = #state{connection = Conn, monitor_ref = MonitorRef}) ->
    demonitor(MonitorRef, [flush])
-  ,ok = gen_server:call(Conn, {add_stream, self()}, infinity)
+  ,Conn ! {add_stream, self()}
   ,{reply, ok, State#state{monitor_ref = undefined}}
-;
-handle_call(stop, _From, State) ->
-  {stop, normal, ok, State}
 ;
 handle_call(sync, _From, State) ->
   {reply, ok, wait_async(State)}
@@ -232,8 +223,9 @@ handle_cast({query_start, PageState, Statement, Args, Consistency} ,State0) ->
   ,ecql_log:log(Time, query, Statement, Args)
   ,{noreply, State#state{laststmt = Statement, lastresult = Ret}}
 ;
-handle_cast(terminate ,State) ->
-  {stop ,terminated ,State}
+handle_cast(stop, State) ->
+   wait_async(State)
+  ,{stop, normal, State}
 .
 
 %%------------------------------------------------------------------------------
@@ -243,13 +235,13 @@ handle_info({frame, ResponseOpCode, ResponseBody}, State = #state{async_pending 
   ,{noreply, State#state{async_pending = Pending - 1}}
 ;
 handle_info({'DOWN', MonitorRef, _Type, _Object, _Info}, State = #state{connection = Conn, monitor_ref = MonitorRef}) ->
-   ok = gen_server:call(Conn, {add_stream, self()}, infinity)
+   Conn ! {add_stream, self()}
   ,{noreply, State#state{monitor_ref = undefined}}
 .
 
 %%------------------------------------------------------------------------------
-terminate(_Reason, State) ->
-  {shutdown, State}
+terminate(Reason, State) ->
+  {Reason, State}
 .
 
 %%------------------------------------------------------------------------------
@@ -409,13 +401,13 @@ get_paging_flag(Flag, PGState) ->
 prepare_statement(_Id, Cql, []) ->
   {ok, Cql}
 ;
-prepare_statement(Id, Cql, _) ->
+prepare_statement({Host, Pid}, Cql, _) ->
    Statement = iolist_to_binary(Cql)
-  ,case ets:lookup(ecql_statements, Statement) of
+  ,case ets:lookup(ecql_statements, {Host, Statement}) of
     [] ->
-      case gen_server:call(Id, {prepare, Statement}, infinity) of
+      case gen_server:call(Pid, {prepare, Statement}, infinity) of
         {ok, StatementRec0} ->
-           StatementRec1 = StatementRec0#preparedstatement{cql = Statement}
+           StatementRec1 = StatementRec0#preparedstatement{cql = {Host, Statement}, host = Host}
           ,ets:insert(ecql_statements, StatementRec1)
           ,{ok, StatementRec1}
         ;
