@@ -10,6 +10,7 @@
       ,{vsn ,git}
       ,{registered ,[
          ecql
+        ,ecql_cache
         ,ecql_etsman
         ,ecql_sup
       ]}
