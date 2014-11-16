@@ -135,7 +135,7 @@ value(Cql) ->
 %%------------------------------------------------------------------------------
 handle_info(timeout, State) ->
    % Who timed out?
-   error_logger:error_msg("ecql_cache: Timeout occured~n")
+   error_logger:error_msg("ecql_log: Timeout occured~n")
   ,{noreply, State}
 .
 

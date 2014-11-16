@@ -65,12 +65,14 @@ get(Key, FunResult) ->
 
 %%------------------------------------------------------------------------------
 dirty(Key) ->
-  set(Key, undef)
+   gen_server:abcast(nodes(), ?MODULE, {dirty, Key})
+  ,set(Key, undef)
 .
 
 %%------------------------------------------------------------------------------
 set(Key, Result) ->
-  gen_server:abcast(?MODULE, {set, Key, Result})
+  Index = erlang:phash2(Key, ?CACHE_SIZE)
+ ,ets:insert(?MODULE, {Index, Key, Result, now()})
  ,Result
 .
 
@@ -105,9 +107,8 @@ handle_cast(clear, State) ->
    ets:delete_all_objects(?MODULE)
   ,{noreply, State}
 ;
-handle_cast({set, Key, Result}, State) ->
-  Index = erlang:phash2(Key, ?CACHE_SIZE)
- ,ets:insert(?MODULE, {Index, Key, Result, now()})
+handle_cast({dirty, Key}, State) ->
+  set(Key, undef)
  ,{noreply, State}
 ;
 handle_cast(terminate ,State) ->
