@@ -164,8 +164,9 @@ dirty_write(Record)  ->
   write(Record)
 .
 write(Record) when is_tuple(Record) ->
-   dirty([RecordName | RecordValues] = tuple_to_list(Record))
-  ,do_update_element(RecordName, lists:seq(2, tuple_size(Record)), RecordValues)
+   [RecordName, Key | RecordValues] = tuple_to_list(Record)
+  ,List = lists:zip(lists:seq(3, tuple_size(Record)), RecordValues)
+  ,update_element(RecordName, Key, List)
 .
 
 %%------------------------------------------------------------------------------
@@ -254,10 +255,12 @@ delete_object(Records) when is_list(Records) ->
 delete_object(Record) when is_tuple(Record) ->
   % Correct Impl?
   % Should delete all object according to the pattern or only based on prim key?
-   dirty([RecordName | RecordValues] = tuple_to_list(Record))
+   [RecordName | RecordValues] = tuple_to_list(Record)
   ,{RecordName, Table} = lists:keyfind(RecordName, 1, get_tables())
   ,{type, Type} = lists:keyfind(type, 1, Table)
-  ,do_delete_object(Type, RecordName, RecordValues)
+  ,Ret = do_delete_object(Type, RecordName, RecordValues)
+  ,dirty_cache([RecordName | RecordValues])
+  ,Ret
 .
 do_delete_object(set, RecordName, RecordValues) ->
    ecql:execute(
@@ -658,8 +661,11 @@ update_element(RecordName, Key, Tuple) when is_tuple(Tuple) ->
 ;
 update_element(RecordName, Key, List) ->
    {RecordIndexes, RecordValues} = lists:unzip([{2, Key} | List])
-  ,dirty(RecordName, Key)
-  ,do_update_element(RecordName, RecordIndexes, RecordValues)
+  ,OldRec = read(RecordName, Key)
+  ,Ret = do_update_element(RecordName, RecordIndexes, RecordValues)
+  ,dirty_cache(OldRec)
+  ,dirty_cache(RecordName, RecordIndexes, RecordValues)
+  ,Ret
 .
 do_update_element(RecordName, RecordIndexes, RecordValues) ->
    FieldNames = [map_fieldindex(RecordIndex - 2) || RecordIndex <- RecordIndexes]
@@ -679,29 +685,27 @@ do_update_element(RecordName, RecordIndexes, RecordValues) ->
 %% Private API
 %%-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 
-dirty(RecordName, KeyValue) ->
-  case read(RecordName, KeyValue) of
-    [] ->
-      ok
-    ;
-    [Record] ->
-      dirty(Record)
-    %~
-  end
-.
-dirty(Record) when is_tuple(Record) ->
-   dirty(tuple_to_list(Record))
+dirty_cache([]) ->
+   ok
 ;
-dirty([RecordName, KeyValue | RecordValues]) ->
+dirty_cache([Record]) when is_tuple(Record) ->
+   dirty_cache(tuple_to_list(Record))
+;
+dirty_cache([RecordName | RecordValues]) ->
+   dirty_cache(RecordName, lists:seq(2, length(RecordValues) + 1), RecordValues)
+.
+
+%%------------------------------------------------------------------------------
+dirty_cache(_RecordName, [], []) ->
+   ok
+;
+dirty_cache(RecordName, [2 | RecordIndexes], [KeyValue | RecordValues]) ->
    ecql_cache:dirty({RecordName, KeyValue})
-  ,do_dirty(RecordName, 3, RecordValues)
-.
-do_dirty(_RecordName, _N, []) ->
-  ok
+  ,dirty_cache(RecordName, RecordIndexes, RecordValues)
 ;
-do_dirty(RecordName, N, [Value | RecordValues]) ->
+dirty_cache(RecordName, [N | RecordIndexes], [Value | RecordValues]) ->
    ecql_cache:dirty({RecordName, Value, N})
-  ,do_dirty(RecordName, N + 1, RecordValues)
+  ,dirty_cache(RecordName, RecordIndexes, RecordValues)
 .
 
 %%------------------------------------------------------------------------------
