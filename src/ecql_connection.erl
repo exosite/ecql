@@ -28,7 +28,7 @@
 -include("ecql.hrl").
 
 %% Records
--record(state, {socket, pool, available, counter, sender, waiting = [], host}).
+-record(state, {socket, pool, available, counter, sender, waiting = queue:new(), host}).
 -record(preparedstatement, {cql, host, id, metadata, result_metadata}).
 
 %%-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
@@ -95,7 +95,7 @@ stop(Connection) ->
 
 %%------------------------------------------------------------------------------
 handle_call(get_stream, Client, State = #state{available = [], waiting = Waiting, counter = Counter}) ->
-   {noreply, State#state{waiting = [Client | Waiting], counter = Counter + 1}}
+   {noreply, State#state{waiting = queue:in(Client, Waiting), counter = Counter + 1}}
 ;
 handle_call(get_stream, _From, State = #state{available = Streams, counter = Counter, host = Host}) ->
    [Stream | NewAvailable] = Streams
@@ -117,12 +117,20 @@ handle_cast(terminate ,State) ->
 .
 
 %%------------------------------------------------------------------------------
-handle_info({add_stream, Stream}, State = #state{available = Streams, waiting = []}) ->
-  {noreply, State#state{available = [Stream | Streams]}}
-;
-handle_info({add_stream, Stream}, State = #state{waiting = [Client | Rest], host = Host}) ->
-   gen_server:reply(Client, {Host, Stream})
-  ,{noreply, State#state{waiting = Rest}}
+handle_info({add_stream, Stream}, State = #state{
+   available = Streams
+  ,waiting = Waiting
+  ,host = Host
+}) ->
+  case queue:out(Waiting) of
+    {empty, Waiting}->
+       {noreply, State#state{available = [Stream | Streams]}}
+    ;
+    {{value, Client}, Waiting2} ->
+       gen_server:reply(Client, {Host, Stream})
+      ,{noreply, State#state{waiting = Waiting2}}
+    %~
+  end
 ;
 handle_info(stopnow, State = #state{socket = Socket}) ->
    gen_tcp:close(Socket)
