@@ -209,23 +209,23 @@ match_object(RecordPattern) when is_tuple(RecordPattern) ->
   match_object(tuple_to_list(RecordPattern))
 ;
 match_object([RecordName | RecordValues]) when is_atom(RecordName) ->
-  MatchValues = [
+  [{KeyIndex, KeyValue} | Rest] = [
     {ecql:indexof(Value, RecordValues)+2, Value}
     || Value <- RecordValues, not is_ref(Value)
   ]
- ,case MatchValues of
-    [{KeyIndex, KeyValue}] ->
-      index_read(RecordName, KeyValue, KeyIndex)
-    ;
-    _ ->
-      {Keys, Values} = and_pairs(RecordValues)
-      ,select_records(RecordName, [
-         "SELECT * FROM ", map_recordname(RecordName)
-        ," WHERE ", Keys
-        ," ALLOW FILTERING;"
-       ], Values)
-    %~
-  end
+ ,do_match_object(index_read(RecordName, KeyValue, KeyIndex), Rest)
+.
+do_match_object(Results, []) ->
+  Results
+;
+do_match_object(Results, Other) ->
+  [Obj || Obj <- Results, do_match_object_test(Obj, Other)]
+.
+do_match_object_test(_Obj, []) ->
+  true
+;
+do_match_object_test(Obj, [{Index, Value} | Other]) ->
+  element(Index, Obj) == Value andalso do_match_object_test(Obj, Other)
 .
 
 %%------------------------------------------------------------------------------
