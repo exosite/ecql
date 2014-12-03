@@ -37,9 +37,7 @@
 
 %%------------------------------------------------------------------------------
 get_stream(Connection) ->
-   {Host, Pid} = gen_server:call(Connection, get_stream, infinity)
-  ,ok = gen_server:call(Pid, monitor, infinity)
-  ,{Host, Pid}
+  gen_server:call(Connection, get_stream, infinity)
 .
 
 %%------------------------------------------------------------------------------
@@ -97,8 +95,9 @@ stop(Connection) ->
 handle_call(get_stream, Client, State = #state{available = [], waiting = Waiting, counter = Counter}) ->
    {noreply, State#state{waiting = queue:in(Client, Waiting), counter = Counter + 1}}
 ;
-handle_call(get_stream, _From, State = #state{available = Streams, counter = Counter, host = Host}) ->
+handle_call(get_stream, {Client, _Tag}, State = #state{available = Streams, counter = Counter, host = Host}) ->
    [Stream | NewAvailable] = Streams
+  ,Stream ! {monitor, Client}
   ,{reply, {Host, Stream}, State#state{available = NewAvailable, counter = Counter + 1}}
 ;
 handle_call(get_streams, _From, State = #state{pool=Pool}) ->
@@ -127,7 +126,8 @@ handle_info({add_stream, Stream}, State = #state{
        {noreply, State#state{available = [Stream | Streams]}}
     ;
     {{value, Client}, Waiting2} ->
-       gen_server:reply(Client, {Host, Stream})
+       Stream ! {monitor, Client}
+      ,gen_server:reply(Client, {Host, Stream})
       ,{noreply, State#state{waiting = Waiting2}}
     %~
   end

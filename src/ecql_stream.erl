@@ -197,10 +197,6 @@ handle_call({query_batch_async, Cql, ListOfArgs, Consistency}, _From, State) ->
   ,execute_batch(Cql, ListOfArgs, Consistency, State1)
   ,{reply, ok, State1#state{async_pending = Pending + 1, async_laststmt = Cql, async_start = now()}}
 ;
-handle_call(monitor, {From, _Ref}, State) ->
-   Ref = monitor(process, From)
-  ,{reply, ok, State#state{monitor_ref = Ref}}
-;
 handle_call(release, _From, State = #state{monitor_ref = undefined}) ->
    {reply, {error, already_released}, State}
 ;
@@ -237,6 +233,10 @@ handle_info({frame, ResponseOpCode, ResponseBody}, State = #state{async_pending 
 handle_info({'DOWN', MonitorRef, _Type, _Object, _Info}, State = #state{connection = Conn, monitor_ref = MonitorRef}) ->
    Conn ! {add_stream, self()}
   ,{noreply, State#state{monitor_ref = undefined}}
+;
+handle_info({monitor, Client}, State = #state{monitor_ref = undefined}) ->
+   Ref = monitor(process, Client)
+  ,{noreply, State#state{monitor_ref = Ref}}
 .
 
 %%------------------------------------------------------------------------------
