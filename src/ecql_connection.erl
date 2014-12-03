@@ -95,9 +95,9 @@ stop(Connection) ->
 handle_call(get_stream, Client, State = #state{available = [], waiting = Waiting, counter = Counter}) ->
    {noreply, State#state{waiting = queue:in(Client, Waiting), counter = Counter + 1}}
 ;
-handle_call(get_stream, {Client, _Tag}, State = #state{available = Streams, counter = Counter, host = Host}) ->
+handle_call(get_stream, {Pid, _Tag}, State = #state{available = Streams, counter = Counter, host = Host}) ->
    [Stream | NewAvailable] = Streams
-  ,Stream ! {monitor, Client}
+  ,Stream ! {monitor, Pid}
   ,{reply, {Host, Stream}, State#state{available = NewAvailable, counter = Counter + 1}}
 ;
 handle_call(get_streams, _From, State = #state{pool=Pool}) ->
@@ -125,8 +125,8 @@ handle_info({add_stream, Stream}, State = #state{
     {empty, Waiting}->
        {noreply, State#state{available = [Stream | Streams]}}
     ;
-    {{value, Client}, Waiting2} ->
-       Stream ! {monitor, Client}
+    {{value, Client = {Pid, _Tag}}, Waiting2} ->
+       Stream ! {monitor, Pid}
       ,gen_server:reply(Client, {Host, Stream})
       ,{noreply, State#state{waiting = Waiting2}}
     %~
