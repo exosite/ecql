@@ -29,7 +29,7 @@ start_link() ->
 
 %%------------------------------------------------------------------------------
 init(_) ->
-   ecql_cache = ets:new(ecql_cache ,[named_table, public, {write_concurrency, true}, {read_concurrency, true}])
+   ecql_cache = ets:new(ecql_cache ,[named_table, public, compressed, {write_concurrency, true}, {read_concurrency, true}])
   ,ecql_statements = ets:new(ecql_statements, [named_table, public, {read_concurrency, true}, {keypos, 2}])
   ,{ok, {}}
 .

@@ -120,15 +120,17 @@ transaction(Fun)  ->
 dirty_index_read(RecordName, KeyValue, KeyIndex) ->
   index_read(RecordName, KeyValue, KeyIndex)
 .
-index_read(RecordName, KeyValue, 2) ->
-  ecql_cache:get({RecordName, KeyValue}, fun() ->
-    do_index_read(RecordName, KeyValue, 2)
-  end)
-;
 index_read(RecordName, KeyValue, KeyIndex) when is_binary(KeyValue) or is_atom(KeyValue) ->
-  ecql_cache:get({RecordName, KeyValue, KeyIndex}, fun() ->
-    do_index_read(RecordName, KeyValue, KeyIndex)
-  end)
+  case table_type(RecordName) of
+    set ->
+      ecql_cache:get({RecordName, KeyValue, KeyIndex}, fun() ->
+        do_index_read(RecordName, KeyValue, KeyIndex)
+      end)
+    ;
+    bag ->
+      do_index_read(RecordName, KeyValue, KeyIndex)
+    %~
+  end
 ;
 index_read(RecordName, KeyValue, KeyIndex) ->
   do_index_read(RecordName, KeyValue, KeyIndex)
@@ -256,17 +258,15 @@ delete_object(Record) when is_tuple(Record) ->
   % Correct Impl?
   % Should delete all object according to the pattern or only based on prim key?
    [RecordName | RecordValues] = tuple_to_list(Record)
-  ,{RecordName, Table} = lists:keyfind(RecordName, 1, get_tables())
-  ,{type, Type} = lists:keyfind(type, 1, Table)
-  ,Ret = do_delete_object(Type, RecordName, RecordValues)
-  ,dirty_cache([RecordName | RecordValues])
-  ,Ret
+  ,do_delete_object(table_type(RecordName), RecordName, RecordValues)
 .
 do_delete_object(set, RecordName, RecordValues) ->
-   ecql:execute(
+  Ret = ecql:execute(
      ["DELETE FROM ", map_recordname(RecordName), " WHERE a = ?"]
     ,[ecql:term_to_bin(hd(RecordValues))]
-   )
+  )
+  ,dirty_cache([RecordName | RecordValues])
+  ,Ret
 ;
 do_delete_object(bag, RecordName, RecordValues) ->
    {Keys, Values} = and_pairs(RecordValues)
@@ -660,15 +660,35 @@ update_element(RecordName, Key, Tuple) when is_tuple(Tuple) ->
   update_element(RecordName, Key, [Tuple])
 ;
 update_element(RecordName, Key, List) ->
-   {RecordIndexes, RecordValues} = lists:unzip([{2, Key} | List])
+  do_update_element(table_type(RecordName), RecordName, Key, List)
+.
+do_update_element(set, RecordName, Key, List) ->
+   Changes = [{2, Key} | List]
+  ,{RecordIndexes, RecordValues} = lists:unzip(Changes)
   ,OldRec = read(RecordName, Key)
-  ,Ret = do_update_element(RecordName, RecordIndexes, RecordValues)
-  ,dirty_cache(OldRec)
+  ,Ret = do_update_element(bag, RecordName, Key, List)
+  ,case OldRec of
+    [Record] ->
+      dirty_cache(Record)
+      ,NewRec = lists:foldl(
+        fun({Index, Value}, R0) ->
+          setelement(Index, R0, Value)
+        end
+        ,Record
+        ,Changes
+      )
+      ,ecql_cache:set({RecordName, Key}, [NewRec])
+    ;
+    [] ->
+      ok
+    %~
+  end
   ,dirty_cache(RecordName, RecordIndexes, RecordValues)
   ,Ret
-.
-do_update_element(RecordName, RecordIndexes, RecordValues) ->
-   FieldNames = [map_fieldindex(RecordIndex - 2) || RecordIndex <- RecordIndexes]
+;
+do_update_element(bag, RecordName, Key, List) ->
+   {RecordIndexes, RecordValues} = lists:unzip([{2, Key} | List])
+  ,FieldNames = [map_fieldindex(RecordIndex - 2) || RecordIndex <- RecordIndexes]
   ,ecql:execute(
      [
        "INSERT INTO ", map_recordname(RecordName) ," ("
@@ -685,23 +705,16 @@ do_update_element(RecordName, RecordIndexes, RecordValues) ->
 %% Private API
 %%-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 
-dirty_cache([]) ->
-   ok
+dirty_cache(Record) when is_tuple(Record) ->
+  dirty_cache(tuple_to_list(Record))
 ;
-dirty_cache([Record]) when is_tuple(Record) ->
-   dirty_cache(tuple_to_list(Record))
-;
-dirty_cache([RecordName | RecordValues]) ->
+dirty_cache([RecordName | RecordValues]) when is_atom(RecordName) ->
    dirty_cache(RecordName, lists:seq(2, length(RecordValues) + 1), RecordValues)
 .
 
 %%------------------------------------------------------------------------------
 dirty_cache(_RecordName, [], []) ->
    ok
-;
-dirty_cache(RecordName, [2 | RecordIndexes], [KeyValue | RecordValues]) ->
-   ecql_cache:dirty({RecordName, KeyValue})
-  ,dirty_cache(RecordName, RecordIndexes, RecordValues)
 ;
 dirty_cache(RecordName, [N | RecordIndexes], [Value | RecordValues]) ->
    ecql_cache:dirty({RecordName, Value, N})
@@ -776,6 +789,13 @@ map_fieldindex(FieldIndex) when is_integer(FieldIndex) ->
 %%------------------------------------------------------------------------------
 map_recordname(RecordName) when is_atom(RecordName) ->
   [case C of $. -> $_; _ -> C end || C <- atom_to_list(RecordName)]
+.
+
+%%------------------------------------------------------------------------------
+table_type(RecordName) when is_atom(RecordName) ->
+   {RecordName, Table} = lists:keyfind(RecordName, 1, get_tables())
+  ,{type, Type} = lists:keyfind(type, 1, Table)
+  ,Type
 .
 
 %%------------------------------------------------------------------------------

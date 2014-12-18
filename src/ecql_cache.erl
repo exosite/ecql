@@ -8,10 +8,14 @@
 
 %% Public API
 -export([
-   clear/0
+   cache_size/0
+  ,clear/0
   ,get/2
   ,dirty/1
   ,set/2
+  ,set_cache_size/1
+  ,stats/0
+  ,clear_stats/0
 ]).
 
 %% OTP gen_server
@@ -27,12 +31,25 @@
 ]).
 
 %% Defines
--define(CACHE_SIZE, 1000000).
+%-define(stats, false).
+-define(DEFAULT_CACHESIZE, 1000000).
 -define(seconds(X), X*1000000).
 
 %%-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 %% Public API
 %%-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+
+%%------------------------------------------------------------------------------
+cache_size() ->
+  case ets:lookup(?MODULE, cache_size) of
+    [{cache_size, CacheSize}] ->
+      CacheSize
+    ;
+    _Other ->
+      ?DEFAULT_CACHESIZE
+    %~
+  end
+.
 
 %%------------------------------------------------------------------------------
 clear() ->
@@ -41,39 +58,105 @@ clear() ->
 
 %%------------------------------------------------------------------------------
 get(Key, FunResult) ->
-  Index = erlang:phash2(Key, ?CACHE_SIZE)
+  Index = erlang:phash2(Key, cache_size())
  ,case ets:lookup(?MODULE, Index) of
     [{Index, Key, undef, _}] ->
-      set(Key, FunResult())
+       incr_stat(undef)
+      ,set(Key, FunResult())
     ;
     [{Index, Key, Value, Time}] ->
       Diff = timer:now_diff(now(), Time)
      ,case Diff > (?seconds(3600)*24*30) of
         true ->
-          set(Key, FunResult())
+           incr_stat(old)
+          ,set(Key, FunResult())
         ;
         false ->
           Value
         %~
       end
     ;
+    [] -> % [] or [Index, OtherKey, Value, Time]
+       incr_stat(empty)
+      ,set(Key, FunResult())
+    ;
     _Other -> % [] or [Index, OtherKey, Value, Time]
-      set(Key, FunResult())
+       incr_stat(conflict)
+      ,set(Key, FunResult())
     %~
   end
 .
 
 %%------------------------------------------------------------------------------
+get_stat(Key) ->
+  case ets:lookup(?MODULE, Key) of
+    [{Key, Num}] ->
+      Num
+    ;
+    _Other ->
+      0
+    %~
+  end
+.
+
+%%------------------------------------------------------------------------------
+stats() ->
+  [{Key, get_stat(Key)} || Key <- [undef, empty, old, conflict]]
+.
+
+%%------------------------------------------------------------------------------
+clear_stats() ->
+  [set_stat(Key, 0) || {Key, _} <- stats()]
+.
+
+%%------------------------------------------------------------------------------
+-ifdef(stats).
+incr_stat(Key) ->
+  set_stat(Key, get_stat(Key) + 1)
+.
+-else.
+incr_stat(_Key) ->
+  ok
+.
+-endif.
+
+%%------------------------------------------------------------------------------
+set_stat(Key, Num) when is_integer(Num) ->
+  ets:insert(?MODULE, {Key, Num})
+.
+
+
+%%------------------------------------------------------------------------------
 dirty(Key) ->
    gen_server:abcast(nodes(), ?MODULE, {dirty, Key})
-  ,set(Key, undef)
+  ,do_dirty(Key)
+.
+do_dirty(Key) ->
+  Index = erlang:phash2(Key, cache_size())
+ ,case ets:lookup(?MODULE, Index) of
+    [] ->
+      ok
+    ;
+    [{Index, Key, _, _}] ->
+      ets:insert(?MODULE, {Index, Key, undef, now()})
+    ;
+    _Other ->
+      ok
+    %~
+  end
 .
 
 %%------------------------------------------------------------------------------
 set(Key, Result) ->
-  Index = erlang:phash2(Key, ?CACHE_SIZE)
+  Index = erlang:phash2(Key, cache_size())
  ,ets:insert(?MODULE, {Index, Key, Result, now()})
  ,Result
+.
+
+%%------------------------------------------------------------------------------
+set_cache_size(CacheSize) when is_integer(CacheSize) ->
+   ets:delete_all_objects(?MODULE)
+  ,ets:insert(?MODULE, {cache_size, CacheSize})
 .
 
 %%-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
@@ -89,6 +172,7 @@ start_link() ->
 init(_) ->
    Configuration = application:get_all_env()
   ,ok = net_kernel:monitor_nodes(true)
+  ,set_cache_size(proplists:get_value(cache_size, Configuration, ?DEFAULT_CACHESIZE))
   ,{ok, Configuration}
 .
 
@@ -104,11 +188,13 @@ handle_call(stop, _From, State) ->
 
 %%------------------------------------------------------------------------------
 handle_cast(clear, State) ->
-   ets:delete_all_objects(?MODULE)
+   CacheSize = cache_size()
+  ,ets:delete_all_objects(?MODULE)
+  ,set_cache_size(CacheSize)
   ,{noreply, State}
 ;
 handle_cast({dirty, Key}, State) ->
-  set(Key, undef)
+  do_dirty(Key)
  ,{noreply, State}
 ;
 handle_cast(terminate ,State) ->
