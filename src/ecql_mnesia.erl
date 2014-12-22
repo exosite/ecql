@@ -392,7 +392,7 @@ create_table(Name ,Def) ->
        ok
     %~
    end
-  ,ok = ecql:config(tables, undefined)
+  ,ok = ecql_cache:dirty({ecql_mnesia, tables})
   ,{atomic ,ok}
 .
 do_create_table(set, Name, Fields) ->
@@ -864,32 +864,26 @@ split(_NObjects ,ResultList) ->
 
 %%------------------------------------------------------------------------------
 get_tables() ->
-  case ecql:config(tables) of
-    undefined ->
-       {_, CQLTables} = ecql:select([
-         "SELECT columnfamily_name, comment FROM system.schema_columnfamilies"
-       ])
-      ,Tables = [
-        {
-           unmap_recordname(TableName)
-          ,[{
-             type
-            ,case Comment of
-               "ecql_mnesia_set" -> set
-              ;"ecql_mnesia_bag" -> bag
-             end
-           }]
-        }
-        || [TableName, Comment] <- CQLTables
-          ,string:left(Comment, 11) =:= "ecql_mnesia"
-       ]
-      ,ok = ecql:config(tables, Tables)
-      ,Tables
-    ;
-    Tables ->
-      Tables
-    %~
-  end
+  ecql_cache:get({ecql_mnesia, tables}, fun() ->
+     {_, CQLTables} = ecql:select([
+       "SELECT columnfamily_name, comment FROM system.schema_columnfamilies"
+     ])
+    ,Tables = [
+      {
+         unmap_recordname(TableName)
+        ,[{
+           type
+          ,case Comment of
+             "ecql_mnesia_set" -> set
+            ;"ecql_mnesia_bag" -> bag
+           end
+         }]
+      }
+      || [TableName, Comment] <- CQLTables
+        ,string:left(Comment, 11) =:= "ecql_mnesia"
+     ]
+    ,Tables
+  end)
 .
 
 %%==============================================================================
