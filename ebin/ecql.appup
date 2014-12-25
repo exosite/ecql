@@ -5,24 +5,22 @@
 %%==============================================================================
 
   {
-     "v0.2"
+     "v0.3"
     ,[
       {
-         "v0.1-6-g27d22d6"
+         "v0.2"
         ,[
-           {load_module ,ecql_etsman}
-          ,{load_module ,ecql_cache}
-          ,{load_module ,ecql_mnesia}
+           {load_module ,ecql_mnesia}
+          ,{load_module ,ecql_stream}
         ]
       }
     ]
     ,[
       {
-         "v0.1-6-g27d22d6"
+         "v0.2"
         ,[
-           {load_module ,ecql_etsman}
-          ,{load_module ,ecql_cache}
-          ,{load_module ,ecql_mnesia}
+           {load_module ,ecql_mnesia}
+          ,{load_module ,ecql_stream}
         ]
       }
     ]
