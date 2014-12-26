@@ -35,7 +35,7 @@
 %% Defines
 -define(TIMEOUT, infinity).
 -define(MAX_PENDING, 100).
--define(BATCH_SIZE, 50).
+-define(BATCH_SIZE, 40).
 -define(MAX_PENDING_BATCH, 5).
 -define(DISABLED_PAGING, #paging{flag = 0}).
 
