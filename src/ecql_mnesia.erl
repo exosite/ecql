@@ -652,7 +652,13 @@ do_foldr(Fun, {Value, Iter}, Acc) ->
 %%------------------------------------------------------------------------------
 select_records(RecordName, Cql, Args) when is_atom(RecordName) ->
    {_Keys, Rows} = ecql:select(Cql, Args)
-  ,[list_to_tuple([RecordName | ecql:eval_all(RecordValues)]) || RecordValues <- Rows]
+  ,Context = {Cql, Args}
+  ,[
+     list_to_tuple([RecordName | ecql:eval_all(RecordValues)])
+     ||
+     RecordValues <- Rows
+    ,is_valid_record(RecordValues, Context)
+  ]
 .
 
 %%------------------------------------------------------------------------------
@@ -852,6 +858,22 @@ implode_concat(_Sep, []) ->
 ;
 implode_concat(Sep, [Head | Tail]) ->
   [Sep, Head] ++ implode_concat(Sep, Tail)
+.
+
+%%------------------------------------------------------------------------------
+is_valid_record([], Context) ->
+   error_logger:error_msg("ecql_mnesia: Empty record ~p~n", [Context])
+  ,false
+;
+is_valid_record([undefined | _RecordList], Context) ->
+   error_logger:error_msg("ecql_mnesia: Partial record ~p~n", [Context])
+  ,false
+;
+is_valid_record([_Element], _Context) ->
+  true
+;
+is_valid_record(RecordList, Context) ->
+  is_valid_record(tl(RecordList), Context)
 .
 
 %%------------------------------------------------------------------------------
