@@ -90,7 +90,7 @@ handle_call({set_logprobability, Frac}, _From, State) ->
 ;
 handle_call({set_file, Filename}, _From, State = #state{file = Fp}) ->
    Fp =/= none andalso file:close(Fp)
-  ,case file:open(Filename, [binary, delayed_write, append]) of
+  ,case is_list(Filename) andalso file:open(Filename, [binary, delayed_write, append]) of
      {ok, Fp2} -> {reply, ok, State#state{file = Fp2}}
     ;Other -> {reply, Other, State#state{file = none}}
   end
