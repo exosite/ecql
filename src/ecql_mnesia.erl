@@ -120,7 +120,7 @@ transaction(Fun)  ->
 dirty_index_read(RecordName, KeyValue, KeyIndex) ->
   index_read(RecordName, KeyValue, KeyIndex)
 .
-index_read(RecordName, KeyValue, KeyIndex) when is_binary(KeyValue) or is_atom(KeyValue) ->
+index_read(RecordName, KeyValue, KeyIndex) ->
   case table_type(RecordName) of
     set ->
       ecql_cache:get({RecordName, KeyValue, KeyIndex}, fun() ->
@@ -131,9 +131,6 @@ index_read(RecordName, KeyValue, KeyIndex) when is_binary(KeyValue) or is_atom(K
       do_index_read(RecordName, KeyValue, KeyIndex)
     %~
   end
-;
-index_read(RecordName, KeyValue, KeyIndex) ->
-  do_index_read(RecordName, KeyValue, KeyIndex)
 .
 do_index_read(RecordName, KeyValue, KeyIndex) when is_atom(RecordName) ->
   % KeyIndex is actually the list position (starting at 1) behind the RecordName

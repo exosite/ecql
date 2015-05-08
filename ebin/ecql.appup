@@ -5,22 +5,20 @@
 %%==============================================================================
 
   {
-     "v0.5"
+     "v0.6"
     ,[
       {
-         "v0.4"
+         "v0.5"
         ,[
-           {load_module ,ecql_log}
-          ,{load_module ,ecql_mnesia}
+           {load_module ,ecql_stream}
         ]
       }
     ]
     ,[
       {
-         "v0.4"
+         "v0.5"
         ,[
-           {load_module ,ecql_log}
-          ,{load_module ,ecql_mnesia}
+           {load_module ,ecql_stream}
         ]
       }
     ]
