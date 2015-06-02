@@ -9,11 +9,13 @@
 %% Public API
 -export([
    cache_size/0
+  ,cluster_module/0
   ,clear/0
   ,get/2
   ,dirty/1
   ,set/2
   ,set_cache_size/1
+  ,set_cluster_module/1
   ,stats/0
   ,clear_stats/0
 ]).
@@ -33,6 +35,7 @@
 %% Defines
 %-define(stats, false).
 -define(DEFAULT_CACHESIZE, 1000000).
+-define(DEFAULT_CLUSTER_MODULE, erlang).
 -define(seconds(X), X*1000000).
 
 %%-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
@@ -47,6 +50,17 @@ cache_size() ->
     ;
     _Other ->
       ?DEFAULT_CACHESIZE
+    %~
+  end
+.
+
+cluster_module() ->
+  case ets:lookup(?MODULE, cluster_module) of
+    [{cluster_module, Module}] ->
+      Module
+    ;
+    _Other ->
+      ?DEFAULT_CLUSTER_MODULE
     %~
   end
 .
@@ -128,7 +142,8 @@ set_stat(Key, Num) when is_integer(Num) ->
 
 %%------------------------------------------------------------------------------
 dirty(Key) ->
-   gen_server:abcast(nodes(), ?MODULE, {dirty, Key})
+   Module = cluster_module()
+  ,gen_server:abcast(Module:nodes(), ?MODULE, {dirty, Key})
   ,do_dirty(Key)
 .
 do_dirty(Key) ->
@@ -159,6 +174,11 @@ set_cache_size(CacheSize) when is_integer(CacheSize) ->
   ,ets:insert(?MODULE, {cache_size, CacheSize})
 .
 
+%%------------------------------------------------------------------------------
+set_cluster_module(Module) when is_atom(Module) ->
+  ets:insert(?MODULE, {cluster_module, Module})
+.
+
 %%-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 %% OTP gen_server API
 %%-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
@@ -173,6 +193,7 @@ init(_) ->
    Configuration = application:get_all_env()
   ,ok = net_kernel:monitor_nodes(true)
   ,set_cache_size(proplists:get_value(cache_size, Configuration, ?DEFAULT_CACHESIZE))
+  ,set_cluster_module(proplists:get_value(cluster_module, Configuration, ?DEFAULT_CLUSTER_MODULE))
   ,{ok, Configuration}
 .
 
@@ -189,8 +210,10 @@ handle_call(stop, _From, State) ->
 %%------------------------------------------------------------------------------
 handle_cast(clear, State) ->
    CacheSize = cache_size()
+  ,Module = cluster_module()
   ,ets:delete_all_objects(?MODULE)
   ,set_cache_size(CacheSize)
+  ,set_cluster_module(Module)
   ,{noreply, State}
 ;
 handle_cast({dirty, Key}, State) ->
