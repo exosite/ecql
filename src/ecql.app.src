@@ -21,7 +21,8 @@
         ,stdlib
       ]}
       ,{env, [
-         {log, disabled}
+         {cache_size, 1000000}
+        ,{log, disabled}
         ,{user, ""}
         ,{pass, ""}
         ,{hosts, [
