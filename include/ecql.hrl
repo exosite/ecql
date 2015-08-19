@@ -10,6 +10,7 @@
 %% Defines
 -define(VS_REQUEST, 2).
 -define(VS_RESPONSE, 130).
+-define(VS_RESPONSE3, 131).
 
 -define(OP_ERROR, 0).
 -define(OP_STARTUP, 1).

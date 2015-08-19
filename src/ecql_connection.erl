@@ -190,6 +190,13 @@ waitforframe(<<?VS_RESPONSE, 0, StreamId, OpCode, Length:?T_UINT32, PartialFrame
    <<FrameBody:Length/binary, Rest/binary>> = waitforframe(Length, [PartialFrameBody])
   ,{#frame{stream=StreamId, opcode=OpCode, body=FrameBody}, Rest}
 ;
+waitforframe(<<?VS_RESPONSE3, 0, StreamId, OpCode, Length:?T_UINT32, FrameBody:Length/binary, Rest/binary>>) ->
+  {#frame{stream=StreamId, opcode=OpCode, body=FrameBody}, Rest}
+;
+waitforframe(<<?VS_RESPONSE3, 0, StreamId, OpCode, Length:?T_UINT32, PartialFrameBody/binary>>) ->
+   <<FrameBody:Length/binary, Rest/binary>> = waitforframe(Length, [PartialFrameBody])
+  ,{#frame{stream=StreamId, opcode=OpCode, body=FrameBody}, Rest}
+;
 waitforframe(IncompleteHeader) ->
   receive {tcp, _Socket, Data} ->
     waitforframe(<<IncompleteHeader/binary, Data/binary>>)
