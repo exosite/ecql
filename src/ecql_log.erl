@@ -45,8 +45,8 @@ set_logprobability(Frac) ->
 .
 
 %%------------------------------------------------------------------------------
-set_slowthreshold(Frac) ->
-  gen_server:call(?MODULE, {set_slowthreshold, Frac})
+set_slowthreshold(Microseconds) ->
+  gen_server:call(?MODULE, {set_slowthreshold, Microseconds})
 .
 
 %%------------------------------------------------------------------------------
@@ -82,8 +82,8 @@ stop() ->
 .
 
 %%------------------------------------------------------------------------------
-handle_call({set_slowthreshold, Frac}, _From, State) ->
-  {reply, ok, State#state{slowthreshold = Frac}}
+handle_call({set_slowthreshold, Microseconds}, _From, State) ->
+  {reply, ok, State#state{slowthreshold = Microseconds}}
 ;
 handle_call({set_logprobability, Frac}, _From, State) ->
   {reply, ok, State#state{logprobability = Frac, psum = 0}}
