@@ -52,5 +52,12 @@
 -define(CL_LOCAL_SERIAL, 16#0009).
 -define(CL_LOCAL_ONE, 16#000A).
 
+-define(CACHE_SLICES_TUPLE, {
+  ecql_cache_1, ecql_cache_2, ecql_cache_3, ecql_cache_4, ecql_cache_5
+}).
+-define(CACHE_SLICES_LIST, [
+  ecql_cache_1, ecql_cache_2, ecql_cache_3, ecql_cache_4, ecql_cache_5
+]).
+
 %%==============================================================================
 %% END OF FILE

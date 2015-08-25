@@ -18,20 +18,45 @@
   ,terminate/2
 ]).
 
+%% Includes
+-include("ecql.hrl").
+
 %%-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 %% OTP gen_server API
 %%-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 
 %%------------------------------------------------------------------------------
 start_link() ->
-  gen_server:start_link({local, ?MODULE}, ?MODULE, {} ,[])
+  gen_server:start_link({local, ?MODULE}, ?MODULE, {}, [])
 .
 
 %%------------------------------------------------------------------------------
 init(_) ->
-   ecql_cache = ets:new(ecql_cache ,[named_table, public, compressed, {write_concurrency, true}, {read_concurrency, true}])
-  ,ecql_statements = ets:new(ecql_statements, [named_table, public, {read_concurrency, true}, {keypos, 2}])
+   ensure_ets_tables()
   ,{ok, {}}
+.
+ensure_ets_tables() ->
+   ensure_ets_table(ecql_cache, [compressed, {write_concurrency, true}])
+  ,lists:foreach(
+    fun(Atom) ->
+      ensure_ets_table(Atom, [compressed, {write_concurrency, true}])
+    end
+    ,?CACHE_SLICES_LIST
+  )
+  ,ensure_ets_table(ecql_statements, [{keypos, 2}])
+.
+ensure_ets_table(Name, Options) ->
+  Self = self()
+  ,case ets:info(Name, owner) of
+    undefined ->
+      Name = ets:new(
+        Name, [named_table, public, {read_concurrency, true} | Options]
+      )
+    ;
+    Self ->
+      Name
+    %~
+  end
 .
 
 %%------------------------------------------------------------------------------
@@ -45,8 +70,8 @@ handle_call(stop, _From, State) ->
 .
 
 %%------------------------------------------------------------------------------
-handle_cast(terminate ,State) ->
-  {stop ,terminated ,State}
+handle_cast(terminate, State) ->
+  {stop, terminated, State}
 .
 
 %%------------------------------------------------------------------------------
@@ -62,8 +87,9 @@ terminate(_Reason, State) ->
 .
 
 %%------------------------------------------------------------------------------
-code_change(_ ,State ,_) ->
-  {ok ,State}
+code_change(_, State, _) ->
+   ensure_ets_tables()
+  ,{ok, State}
 .
 
 %%==============================================================================
