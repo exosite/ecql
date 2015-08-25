@@ -512,7 +512,7 @@ eval(Binary) when is_binary(Binary) ->
 
 %%------------------------------------------------------------------------------
 eval_all(Values) ->
-  [eval(Value) || Value <- Values]
+  [eval(Value) || Value <- Values, Value =/= undefined]
 .
 
 %%------------------------------------------------------------------------------

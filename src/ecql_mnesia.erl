@@ -675,7 +675,21 @@ do_update_element(set, RecordName, Key, List) ->
       dirty_cache(Record)
       ,NewRec = lists:foldl(
         fun({Index, Value}, R0) ->
-          setelement(Index, R0, Value)
+          case catch setelement(Index, R0, Value) of
+            {'EXIT', {badarg, Badarg}} ->
+              case erlang:size(R0) + 1 of
+                Index ->
+                  erlang:append_element(R0, Value)
+                ;
+                _ ->
+                  throw({badarg, Badarg})
+                %~
+              end
+            ;
+            Tuple ->
+              Tuple
+            %~
+          end
         end
         ,Record
         ,Changes
@@ -863,14 +877,26 @@ is_valid_record([], Context) ->
   ,false
 ;
 is_valid_record([undefined | _RecordList], Context) ->
-   error_logger:error_msg("ecql_mnesia: Partial record ~p~n", [Context])
-  ,false
+  is_valid_tail(_RecordList, Context)
 ;
 is_valid_record([_Element], _Context) ->
   true
 ;
 is_valid_record(RecordList, Context) ->
   is_valid_record(tl(RecordList), Context)
+.
+
+%%------------------------------------------------------------------------------
+is_valid_tail([], Context) ->
+   error_logger:error_msg("ecql_mnesia: Non-migrated record ~p~n", [Context])
+  ,true
+;
+is_valid_tail([undefined | RecordList], Context) ->
+   is_valid_tail(RecordList, Context)
+;
+is_valid_tail(_RecordList, Context) ->
+   error_logger:error_msg("ecql_mnesia: Partial record ~p~n", [Context])
+  ,false
 .
 
 %%------------------------------------------------------------------------------
