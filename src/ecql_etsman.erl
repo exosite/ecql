@@ -36,10 +36,10 @@ init(_) ->
   ,{ok, {}}
 .
 ensure_ets_tables() ->
-   ensure_ets_table(ecql_cache, [compressed, {write_concurrency, true}])
+   ensure_ets_table(ecql_cache, [{write_concurrency, true}])
   ,lists:foreach(
     fun(Atom) ->
-      ensure_ets_table(Atom, [compressed, {write_concurrency, true}])
+      ensure_ets_table(Atom, [{write_concurrency, true}])
     end
     ,?CACHE_SLICES_LIST
   )

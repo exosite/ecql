@@ -6,10 +6,7 @@
 -module(ecql_stream).
 -behaviour(gen_server).
 -compile(native).
--compile(inline).
--compile({inline_size,   500}).    %% default=24
--compile({inline_effort, 500}).   %% default=150
--compile({inline_unroll, 5}).
+-compile({hipe, [o3]}).
 
 %% Public API
 -export([
