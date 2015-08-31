@@ -204,6 +204,7 @@ handle_cast(clear, State) ->
    CacheSize = cache_size()
   ,Module = cluster_module()
   ,ets:delete_all_objects(?MODULE)
+  ,[ets:delete_all_objects(Table) || Table <- ?CACHE_SLICES_LIST]
   ,set_cache_size(CacheSize)
   ,set_cluster_module(Module)
   ,{noreply, State}
