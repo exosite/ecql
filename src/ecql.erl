@@ -61,6 +61,10 @@
   ,select/1
   ,select/2
   ,select/3
+  ,select_firstpage/1
+  ,select_firstpage/2
+  ,select_firstpage/3
+  ,select_nextpage/1
   ,select_value/1
   ,select_value/2
   ,select_value/3
@@ -407,6 +411,26 @@ select_value(Cql, Args, Consistency) ->
       hd(List)
     %~
   end
+.
+
+%%------------------------------------------------------------------------------
+select_firstpage(Cql) ->
+  select_firstpage(Cql, [], ?CL_DEFAULT)
+.
+
+%%------------------------------------------------------------------------------
+select_firstpage(Cql, Args) ->
+  select_firstpage(Cql, Args, ?CL_DEFAULT)
+.
+
+%%------------------------------------------------------------------------------
+select_firstpage(Cql, Args, Consistency) ->
+  with_stream_do(query_page, [Cql, Args, Consistency])
+.
+
+%%------------------------------------------------------------------------------
+select_nextpage(Continuation) ->
+  with_stream_do(query_page, [Continuation])
 .
 
 %%------------------------------------------------------------------------------

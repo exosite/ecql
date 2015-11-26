@@ -14,6 +14,8 @@
   ,query/4
   ,query_async/4
   ,query_batch/4
+  ,query_page/2
+  ,query_page/4
   ,release/1
   ,sync/1
 ]).
@@ -140,6 +142,38 @@ do_query_batch(Id, Prep, ListOfArgs, Consistency) when length(ListOfArgs) > ?BAT
 ;
 do_query_batch({_, Pid}, Prep, ListOfArgs, Consistency) ->
    gen_server:call(Pid, {query_batch_async, Prep, ListOfArgs, Consistency}, ?TIMEOUT)
+.
+
+%%------------------------------------------------------------------------------
+query_page(Id, Cql, Args, Consistency) ->
+  case prepare_statement(Id, Cql, Args) of
+    {ok, Prep} ->
+      do_query_page(Id, Prep, Args, Consistency, <<>>)
+    ;
+    Error ->
+      Error
+    %~
+  end
+.
+query_page(Id, {continuation, Prep, Args, Consistency, PageState}) ->
+  do_query_page(Id, Prep, Args, Consistency, PageState)
+;
+query_page(_Id, '$end_of_table') ->
+  '$end_of_table'
+.
+do_query_page({_, Pid}, Prep, Args, Consistency, OldPageState) ->
+   gen_server:cast(Pid, {query_start, OldPageState, Prep, Args, Consistency})
+  ,case gen_server:call(Pid, query_receive, ?TIMEOUT) of
+    {<<>>, KeysRowsTuple} ->
+       {KeysRowsTuple, '$end_of_table'}
+    ;
+    {PageState, KeysRowsTuple} when is_binary(PageState) ->
+       {KeysRowsTuple, {continuation, Prep, Args, Consistency, PageState}}
+    ;
+    Other ->
+      Other
+    %~
+  end
 .
 
 %%------------------------------------------------------------------------------

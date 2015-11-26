@@ -208,9 +208,9 @@ match_object(RecordPattern) when is_tuple(RecordPattern) ->
   match_object(tuple_to_list(RecordPattern))
 ;
 match_object([RecordName | RecordValues]) when is_atom(RecordName) ->
-  [{KeyIndex, KeyValue} | Rest] = [
-    {ecql:indexof(Value, RecordValues)+2, Value}
-    || Value <- RecordValues, not is_ref(Value)
+   IndexedValues = lists:zip(lists:seq(1, length(RecordValues)), RecordValues)
+  ,[{KeyIndex, KeyValue} | Rest] = [
+    {Index+1, Value} || {Index, Value} <- IndexedValues, not is_ref(Value)
   ]
  ,do_match_object(index_read(RecordName, KeyValue, KeyIndex), Rest)
 .
@@ -440,6 +440,22 @@ dirty_update_counter(RecordName, KeyValue, Increment) when is_atom(RecordName) -
 dirty_select(Tuple) ->
   select(Tuple)
 .
+select({continuation, [], '$end_of_table', _NObjects, _Filter}) ->
+  '$end_of_table'
+;
+select({continuation, ResultList, Cont, NObjects, Filter}) ->
+  case ((length(ResultList) >= NObjects) orelse (Cont == '$end_of_table')) of
+    true ->
+       {Frame ,Rest} = split(NObjects ,ResultList)
+      ,Records = apply_filter(Frame, Filter)
+      ,{Records, {continuation, Rest, Cont, NObjects, Filter}}
+    ;
+    false ->
+       {{_, Ret}, Cont2} = ecql:select_nextpage(Cont)
+      ,select({continuation, ResultList ++ Ret, Cont2, NObjects, Filter})
+    %~
+  end
+;
 select({continuation ,[] ,_NObjects}) ->
   '$end_of_table'
 ;
@@ -450,6 +466,43 @@ select({continuation ,ResultList ,NObjects}) ->
 select(_Cont) ->
   '$end_of_table'
 .
+create_filter(RecordValues, ResultTuple) ->
+   IndexedValues = lists:zip(lists:seq(1, length(RecordValues)), RecordValues)
+  ,Symbols = dict:from_list([
+    {Value, Index} || {Index, Value} <- IndexedValues, is_ref(Value)
+  ])
+  ,Matches = [{I, ecql:term_to_bin(Value)} || {I, Value} <- IndexedValues, not is_ref(Value)]
+  ,ResultList = tuple_to_list(ResultTuple)
+  ,fun(Row) ->
+    case lists:all(
+       fun({Index, Value}) -> lists:nth(Index, Row) == Value end
+      ,Matches
+    ) of
+      true ->
+        {true, list_to_tuple(lists:map(
+          fun(Specifier) ->
+            case is_ref(Specifier) of
+              true ->
+                ecql:eval(lists:nth(dict:fetch(Specifier, Symbols), Row))
+              ;
+              false ->
+                Specifier
+              %~
+            end
+          end
+          ,ResultList
+        ))}
+      ;
+      false ->
+        false
+      %~
+    end
+  end
+.
+apply_filter(Ret, Filter) ->
+  lists:filtermap(Filter, Ret)
+.
+
 
 %%------------------------------------------------------------------------------
 dirty_select(RecordName ,MatchSpec) ->
@@ -479,6 +532,20 @@ select(RecordName ,MatchSpec) when is_atom(RecordName) ->
 dirty_select(RecordName ,MatchSpec ,NObjects ,_Lock) ->
   select(RecordName ,MatchSpec ,NObjects ,_Lock)
 .
+select(RecordName ,[{RecordPattern, [], [{ResultTuple}]}] ,NObjects ,_Lock) when is_atom(RecordName) ->
+   [RecordName | RecordValues] = tuple_to_list(RecordPattern)
+  ,{Keys, Values} = and_pairs(RecordValues, table_type(RecordName))
+  ,{{_, Ret}, Cont} = ecql:select_firstpage(
+    [
+       "SELECT * FROM ", map_recordname(RecordName)
+      ," WHERE ", Keys
+      ," ALLOW FILTERING;"
+    ]
+    ,Values
+  )
+  ,Filter = create_filter(RecordValues, ResultTuple)
+  ,select({continuation, Ret, Cont, NObjects, Filter})
+;
 select(RecordName ,MatchSpec ,NObjects ,_Lock) when is_atom(RecordName) ->
   select({continuation, select(RecordName, MatchSpec), NObjects})
 .
@@ -856,6 +923,23 @@ and_pairs(List) ->
    ]
   ,{Keys, Values} = lists:unzip(KeyValueList)
   ,{implode(" AND ", Keys), Values}
+.
+
+%%------------------------------------------------------------------------------
+and_pairs(List, set) ->
+  and_pairs(List)
+;
+and_pairs(List, bag) ->
+  % bags are all primary key
+   Candiate = lists:takewhile(fun(Value) -> not is_ref(Value) end, List)
+  ,case Candiate of
+    [] ->
+      and_pairs(List)
+    ;
+    _Other ->
+      and_pairs(Candiate)
+    %~
+  end
 .
 
 %%------------------------------------------------------------------------------
