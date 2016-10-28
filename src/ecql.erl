@@ -326,6 +326,9 @@ config(Key, Value) ->
 .
 
 %%------------------------------------------------------------------------------
+%%  Params:
+%%    Fun = fun(Row, Acc) -> ... end
+%%------------------------------------------------------------------------------
 foldl(Fun, Acc, Cql) ->
   foldl(Fun, Acc, Cql, [], ?CL_DEFAULT)
 .
@@ -343,6 +346,9 @@ foldl(Fun, Acc, Cql, Args, Consistency) ->
   ,foldl_page(Fun1, Acc, Cql, Args, Consistency)
 .
 
+%%------------------------------------------------------------------------------
+%%  Params:
+%%    Fun = fun(Keys, Rows, Acc) -> ... end
 %%------------------------------------------------------------------------------
 foldl_page(Fun, Acc, Cql) ->
   foldl_page(Fun, Acc, Cql, [], ?CL_DEFAULT)

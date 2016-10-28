@@ -46,7 +46,7 @@
    connection, sender, stream, async_pending = 0, monitor_ref
   ,async_laststmt, async_start, laststmt, lastresult
 }).
--record(metadata, {flags, columnspecs, paging_state}).
+-record(metadata, {flags, columnspecs, paging_state, pk_index}).
 -record(preparedstatement, {cql, host, id, metadata, result_metadata}).
 -record(paging, {flag = 4, page_state = <<>>, page_size = 1000}).
 
@@ -207,7 +207,7 @@ handle_call(query_receive, _From, State = #state{lastresult = Ret}) ->
 handle_call({query_async, Statement, Args, Consistency}, _From, State0) ->
    State1 = #state{async_pending = Pending} = wait_async(State0, ?MAX_PENDING)
   ,execute_query(Statement, Args, Consistency, State1, ?DISABLED_PAGING)
-  ,{reply, ok, State1#state{async_pending = Pending + 1, async_laststmt = Statement, async_start = now()}}
+  ,{reply, ok, State1#state{async_pending = Pending + 1, async_laststmt = Statement, async_start = erlang:timestamp()}}
 ;
 handle_call({prepare, Cql}, _From, State0) ->
    State1 = wait_async(State0)
@@ -226,7 +226,7 @@ handle_call({query_batch, Statement, ListOfArgs, Consistency}, _From, State) ->
 handle_call({query_batch_async, Cql, ListOfArgs, Consistency}, _From, State) ->
    State1 = #state{async_pending = Pending} = wait_async(State, ?MAX_PENDING_BATCH)
   ,execute_batch(Cql, ListOfArgs, Consistency, State1)
-  ,{reply, ok, State1#state{async_pending = Pending + 1, async_laststmt = Cql, async_start = now()}}
+  ,{reply, ok, State1#state{async_pending = Pending + 1, async_laststmt = Cql, async_start = erlang:timestamp()}}
 ;
 handle_call(release, _From, State = #state{monitor_ref = undefined}) ->
    {reply, {error, already_released}, State}
@@ -300,7 +300,11 @@ wait_async(State = #state{async_pending = Pending}, _Allowed) ->
 
 %%------------------------------------------------------------------------------
 log(ResponseOpCode, Body, State = #state{async_laststmt = Cql, async_start = Begin}) ->
-   ecql_log:log(timer:now_diff(now(), Begin), async, Cql, [])
+   Time = case Begin of
+    undefined -> -1;
+    _ -> timer:now_diff(erlang:timestamp(), Begin)
+  end
+  ,ecql_log:log(Time, async, Cql, [])
   ,case ResponseOpCode of
     ?OP_ERROR ->
       do_log(handle_response(?OP_ERROR, Body), State)
@@ -462,7 +466,7 @@ send_frame(
    Frame =   [
      ?VS_REQUEST
     ,0
-    ,StreamId
+    ,<<StreamId:?T_INT16>>
     ,OpCode
     ,<<(iolist_size(Body)):?T_UINT32>>
     ,Body
@@ -483,11 +487,11 @@ recv_frame(Statement) ->
 
 %%------------------------------------------------------------------------------
 handle_response(?OP_RESULT, <<?RT_ROWS, Body/binary>>, #preparedstatement{result_metadata = #metadata{columnspecs = ColSpecs}}) when ColSpecs =/= undefined ->
-   {#metadata{paging_state = PageState}, Rest} = read_metadata(Body)
+   {#metadata{paging_state = PageState}, Rest} = read_result_metadata(Body)
   ,{PageState, rows(Rest, ColSpecs)}
 ;
 handle_response(?OP_RESULT, <<?RT_ROWS, Body/binary>>, _) ->
-   {#metadata{columnspecs = ColSpecs, paging_state = PageState}, Rest} = read_metadata(Body)
+   {#metadata{columnspecs = ColSpecs, paging_state = PageState}, Rest} = read_result_metadata(Body)
   ,{PageState, rows(Rest, ColSpecs)}
 ;
 handle_response(OpCode, Body, _) ->
@@ -510,7 +514,7 @@ handle_response(?OP_RESULT, <<?RT_SETKEYSPACE, _/binary>>) ->
 ;
 handle_response(?OP_RESULT, <<?RT_PREPARED, Len:?T_UINT16, Id:Len/binary, Body/binary>>) ->
    {Metadata, Rest} = read_metadata(Body)
-  ,{ResultMetadata, <<>>} = read_metadata(Rest)
+  ,{ResultMetadata, <<>>} = read_result_metadata(Rest)
   ,{ok, #preparedstatement{id = Id, metadata = Metadata, result_metadata = ResultMetadata}}
 ;
 handle_response(?OP_RESULT, <<?RT_SCHEMACHANGE, _/binary>>) ->
@@ -669,6 +673,11 @@ read_bytes(<<Len:?T_INT32, Rest/binary>>) when Len < 0 ->
 .
 
 %%------------------------------------------------------------------------------
+read_short(<<Value:?T_UINT16, Rest/binary>>) ->
+  {Value, Rest}
+.
+
+%%------------------------------------------------------------------------------
 % [short bytes]  A [short] n, followed by n bytes if n >= 0.
 read_sbytes(<<Len:?T_UINT16, Value:Len/binary, Rest/binary>>) ->
   {Value, Rest}
@@ -704,12 +713,32 @@ read_colspec_type(Type, Rest) ->
 .
 
 %%------------------------------------------------------------------------------
-read_metadata(<<Flag0:?T_INT32, ColCount:?T_INT32, Body0/binary>>) ->
-   {Flag1, PageState, Body1} = retrieve_pagestate(<<Flag0:32>>, Body0)
-  ,read_metadata(Flag1, PageState, ColCount, Body1)
+read_metadata(<<Flags:?T_INT32, ColCount:?T_INT32, PkCount:?T_INT32, Body0/binary>>) ->
+   {Pks, Body1} = readn(PkCount, Body0, fun read_short/1)
+  ,read_metadata(#metadata{flags = Flags, pk_index = Pks}, ColCount, Body1)
 .
 % table spec per column
-read_metadata(<<0:?T_INT32>>, PageState, ColCount, Body) ->
+read_metadata(M = #metadata{flags = 0}, ColCount, Body) ->
+   {ColSpecs, Rest} = readn(ColCount, Body, fun(ColSpecBin) ->
+     {_TableSpec, ColSpecBinRest0} = read_tablespec(ColSpecBin)
+    ,read_colspec(ColSpecBinRest0)
+   end)
+  ,{M#metadata{columnspecs = format_specs(ColSpecs)}, Rest}
+;
+% global table spec only once
+read_metadata(M = #metadata{flags = 1}, ColCount, Body) ->
+   {_TableSpec, Rest0} = read_tablespec(Body)
+  ,{ColSpecs, Rest1} = readn(ColCount, Rest0, fun read_colspec/1)
+  ,{M#metadata{columnspecs = format_specs(ColSpecs)}, Rest1}
+.
+
+%%------------------------------------------------------------------------------
+read_result_metadata(<<Flag0:?T_INT32, ColCount:?T_INT32, Body0/binary>>) ->
+   {Flag1, PageState, Body1} = retrieve_pagestate(<<Flag0:32>>, Body0)
+  ,read_result_metadata(Flag1, PageState, ColCount, Body1)
+.
+% table spec per column
+read_result_metadata(<<0:?T_INT32>>, PageState, ColCount, Body) ->
    {ColSpecs, Rest} = readn(ColCount, Body, fun(ColSpecBin) ->
      {_TableSpec, ColSpecBinRest0} = read_tablespec(ColSpecBin)
     ,read_colspec(ColSpecBinRest0)
@@ -718,18 +747,18 @@ read_metadata(<<0:?T_INT32>>, PageState, ColCount, Body) ->
     ,paging_state = PageState}, Rest}
 ;
 % global table spec only once
-read_metadata(<<1:?T_INT32>>, PageState, ColCount, Body) ->
+read_result_metadata(<<1:?T_INT32>>, PageState, ColCount, Body) ->
    {_TableSpec, Rest0} = read_tablespec(Body)
   ,{ColSpecs, Rest1} = readn(ColCount, Rest0, fun read_colspec/1)
   ,{#metadata{flags = 1, columnspecs = format_specs(ColSpecs)
     ,paging_state = PageState}, Rest1}
 ;
 % no metadata
-read_metadata(<<4:?T_INT32>>, PageState, _ColCount, Body) ->
+read_result_metadata(<<4:?T_INT32>>, PageState, _ColCount, Body) ->
   {#metadata{flags = 4, paging_state = PageState}, Body}
 ;
 % no metadata + global table spec is actually the same
-read_metadata(<<5:?T_INT32>>, PageState, _ColCount, Body) ->
+read_result_metadata(<<5:?T_INT32>>, PageState, _ColCount, Body) ->
   {#metadata{flags = 5, paging_state = PageState}, Body}
 .
 
@@ -899,9 +928,10 @@ do_wire_batch(Head, [Args | ListOfArgs], Consistency, RequestTypes) ->
   ]
 ;
 do_wire_batch(_Head, [], Consistency, _RequestTypes) ->
-  [<<
-    Consistency:?T_UINT16
-  >>]
+  [
+     <<Consistency:?T_UINT16>>
+    ,0
+  ]
 .
 
 %%------------------------------------------------------------------------------
@@ -952,6 +982,14 @@ wire_value(14, Value) ->
 % NOPE
 % 0x0010    Inet
 % NOPE
+% 0x0011    Date
+% NOPE
+% 0x0012    Time
+% NOPE
+% 0x0013    Smallint
+% NOPE
+% 0x0014    Tinyint
+% NOPE
 % 0x0020    List: the value is an [option], representing the type
 %                of the elements of the list.
 wire_value({list, ValueType}, Values) when is_list(Values) ->
@@ -978,6 +1016,10 @@ wire_value({map, ValueType}, Value) when is_tuple(Value) ->
 wire_value({set, ValueType}, Value) ->
   wire_value({list, ValueType}, Value)
 .
+% 0x0030    UDT
+% NOPE
+% 0x0031    Tuple
+% NOPE
 
 %%------------------------------------------------------------------------------
 wire_bigint(Value) ->

@@ -22,7 +22,7 @@ do_test(Module, Inserts) ->
 .
 
 start_app(App, Options) ->
-   application:load(App)
+   ok = application:load(App)
   ,[application:set_env(App, Key, Value) || {Key, Value} <- Options]
   ,{Ret, _} = application:ensure_all_started(App)
   ,Ret == ok orelse Ret == already_started

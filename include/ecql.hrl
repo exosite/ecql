@@ -5,12 +5,11 @@
 %%==============================================================================
 
 %% Records
--record(frame, {stream, opcode, body}).
+-record(frame, {stream, opcode, body, flags}).
 
 %% Defines
--define(VS_REQUEST, 2).
--define(VS_RESPONSE, 130).
--define(VS_RESPONSE3, 131).
+-define(VS_REQUEST, 4).
+-define(VS_RESPONSE, 132).
 
 -define(OP_ERROR, 0).
 -define(OP_STARTUP, 1).

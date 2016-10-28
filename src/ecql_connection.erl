@@ -60,9 +60,9 @@ init({{Host, Port}, Configuration}) ->
   ,Opts = [{active, true}, {mode, binary}, {recbuf, Buff}, {sndbuf, Buff}]
   ,{ok, Socket} = gen_tcp:connect(Host, Port, Opts, 2000)
   ,ok = gen_tcp:send(Socket, frame_startup())
-  ,User = proplists:get_value(user, Configuration, "")
-  ,Pass = proplists:get_value(pass, Configuration, "")
-  ,ok = auth(waitforframe(), User, Pass)
+  ,User = proplists:get_value(user, Configuration, "cassandra")
+  ,Pass = proplists:get_value(pass, Configuration, "cassandra")
+  ,ok = auth(waitforframe(), User, Pass, Socket)
   ,PoolSize = proplists:get_value(streams_per_connection, Configuration, 25)
   ,{ok, Sender} = ecql_sender:start_link(Socket)
   ,Pool = init_pool(PoolSize, Sender)
@@ -175,25 +175,36 @@ handle_data(Sofar, Pool) ->
 .
 
 %%------------------------------------------------------------------------------
-auth({#frame{opcode=?OP_READY}, _}, _User, _Pass) ->
+auth({#frame{opcode=?OP_READY}, _}, _User, _Pass, _Socket) ->
   ok
+;
+auth({#frame{opcode=?OP_AUTHENTICATE}, _}, User, Pass, Socket) ->
+   Body = [0, User, 0, Pass]
+  ,ok = gen_tcp:send(Socket,
+    frame(0, ?OP_AUTH_RESPONSE, [<<(iolist_size(Body)):?T_UINT32>>, Body])
+  )
+  ,case waitforframe() of
+    {#frame{opcode=?OP_AUTH_SUCCESS}, _} ->
+      ok
+    ;
+    {#frame{opcode=?OP_ERROR, body = <<Code:?T_INT32, Len:?T_UINT16, Message:Len/binary, _Rest/binary>>}, _} ->
+      {error, Code, binary_to_list(Message)}
+    %~
+  end
+;
+auth(Other, _User, _Pass, _Socket) ->
+  {error, {"Unknown Message", Other}}
 .
 
 %%------------------------------------------------------------------------------
 waitforframe() ->
   waitforframe(<<>>)
 .
-waitforframe(<<?VS_RESPONSE, 0, StreamId, OpCode, Length:?T_UINT32, FrameBody:Length/binary, Rest/binary>>) ->
+% TODO ADD FLAGS
+waitforframe(<<?VS_RESPONSE, 0, StreamId:?T_INT16, OpCode, Length:?T_UINT32, FrameBody:Length/binary, Rest/binary>>) ->
   {#frame{stream=StreamId, opcode=OpCode, body=FrameBody}, Rest}
 ;
-waitforframe(<<?VS_RESPONSE, 0, StreamId, OpCode, Length:?T_UINT32, PartialFrameBody/binary>>) ->
-   <<FrameBody:Length/binary, Rest/binary>> = waitforframe(Length, [PartialFrameBody])
-  ,{#frame{stream=StreamId, opcode=OpCode, body=FrameBody}, Rest}
-;
-waitforframe(<<?VS_RESPONSE3, 0, StreamId, OpCode, Length:?T_UINT32, FrameBody:Length/binary, Rest/binary>>) ->
-  {#frame{stream=StreamId, opcode=OpCode, body=FrameBody}, Rest}
-;
-waitforframe(<<?VS_RESPONSE3, 0, StreamId, OpCode, Length:?T_UINT32, PartialFrameBody/binary>>) ->
+waitforframe(<<?VS_RESPONSE, 0, StreamId:?T_INT16, OpCode, Length:?T_UINT32, PartialFrameBody/binary>>) ->
    <<FrameBody:Length/binary, Rest/binary>> = waitforframe(Length, [PartialFrameBody])
   ,{#frame{stream=StreamId, opcode=OpCode, body=FrameBody}, Rest}
 ;
@@ -220,7 +231,7 @@ frame(StreamId, OpCode, Body) ->
   [
      ?VS_REQUEST
     ,0
-    ,StreamId
+    ,<<StreamId:?T_UINT16>>
     ,OpCode
     ,<<(iolist_size(Body)):?T_UINT32>>
     ,Body
