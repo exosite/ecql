@@ -16,7 +16,7 @@
 -define(DUPLICATE_INDEX, 8704).
 % Compare default settings with CASSANDRA-5727
 -define(COMPACTION, "compaction = {'class': 'LeveledCompactionStrategy', 'sstable_size_in_mb': 160}").
--define(CL_DEFAULT, ?CL_LOCAL_QUORUM).
+-define(CL_DEFAULT, local_quorum).
 -define(RECONNECT_INTERVALL, 5000).
 
 %% OTP application
@@ -228,7 +228,7 @@ add_connection(Host, Configuration, NewPool) ->
 
 %%------------------------------------------------------------------------------
 init_query(Id, Cql) ->
-  ecql_stream:query(Id, Cql, [], ?CL_ONE)
+  ecql_stream:query(Id, Cql, [], one)
 .
 
 %%------------------------------------------------------------------------------

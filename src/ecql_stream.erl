@@ -55,6 +55,9 @@
 %%-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 
 %%------------------------------------------------------------------------------
+foldl(Id, Fun, Acc, Cql, Args, Consistency) when is_atom(Consistency) ->
+  foldl(Id, Fun, Acc, Cql, Args, consistency_to_int(Consistency))
+;
 foldl(Id, Fun, Acc, Cql, Args, Consistency) ->
   case prepare_statement(Id, Cql, Args) of
     {ok, Prep} ->
@@ -85,6 +88,9 @@ do_foldl_recv({_, Pid} = Id, Fun, Acc, Prep, Args, Consistency) ->
 .
 
 %%------------------------------------------------------------------------------
+query(Id, Cql, Args, Consistency) when is_atom(Consistency) ->
+  query(Id, Cql, Args, consistency_to_int(Consistency))
+;
 query(Id, Cql, Args, Consistency) ->
   case foldl(Id, fun do_query/3, {[], []}, Cql, Args, Consistency) of
     {Keys, [Rows]} ->
@@ -103,6 +109,9 @@ do_query(Keys, Rows, {_Keys, Rows0}) ->
 .
 
 %%------------------------------------------------------------------------------
+query_async(Id, Cql, Args, Consistency) when is_atom(Consistency) ->
+  query_async(Id, Cql, Args, consistency_to_int(Consistency))
+;
 query_async({_, Pid} = Id, Cql, Args, Consistency) ->
   case prepare_statement(Id, Cql, Args) of
     {ok, Prep} ->
@@ -115,13 +124,21 @@ query_async({_, Pid} = Id, Cql, Args, Consistency) ->
 .
 
 %%------------------------------------------------------------------------------
-query_batch(_, _, [], _) ->
+query_batch(Id, Cql, ListOfArgs, Consistency) ->
+  query_batch(Id, Cql, ListOfArgs, logged, Consistency)
+.
+query_batch(_, _, [], _, _) ->
   ok
 ;
-query_batch(Id, Cql, ListOfArgs, Consistency) ->
+query_batch(Id, Cql, ListOfArgs, Type, Consistency) when is_atom(Consistency) ->
+  query_batch(Id, Cql, ListOfArgs, Type, consistency_to_int(Consistency))
+;
+query_batch(Id, Cql, ListOfArgs, Type, Consistency)
+  when Type == logged orelse Type == unlogged
+->
   case prepare_statement(Id, Cql, ListOfArgs) of
     {ok, Prep} ->
-      case do_query_batch(Id, Prep, ListOfArgs, Consistency) of
+      case do_query_batch(Id, Prep, ListOfArgs, Consistency, Type) of
         ok ->
           sync(Id)
         ;
@@ -135,16 +152,19 @@ query_batch(Id, Cql, ListOfArgs, Consistency) ->
     %~
   end
 .
-do_query_batch(Id, Prep, ListOfArgs, Consistency) when length(ListOfArgs) > ?BATCH_SIZE ->
+do_query_batch(Id, Prep, ListOfArgs, Consistency, Type) when length(ListOfArgs) > ?BATCH_SIZE ->
    {ListOfArgs1, ListOfArgs2} = lists:split(?BATCH_SIZE, ListOfArgs)
-  ,do_query_batch(Id, Prep, ListOfArgs1, Consistency)
-  ,do_query_batch(Id, Prep, ListOfArgs2, Consistency)
+  ,do_query_batch(Id, Prep, ListOfArgs1, Consistency, Type)
+  ,do_query_batch(Id, Prep, ListOfArgs2, Consistency, Type)
 ;
-do_query_batch({_, Pid}, Prep, ListOfArgs, Consistency) ->
-   gen_server:call(Pid, {query_batch_async, Prep, ListOfArgs, Consistency}, ?TIMEOUT)
+do_query_batch({_, Pid}, Prep, ListOfArgs, Consistency, Type) ->
+   gen_server:call(Pid, {query_batch_async, Prep, ListOfArgs, Consistency, Type}, ?TIMEOUT)
 .
 
 %%------------------------------------------------------------------------------
+query_page(Id, Cql, Args, Consistency) when is_atom(Consistency) ->
+  query_page(Id, Cql, Args, consistency_to_int(Consistency))
+;
 query_page(Id, Cql, Args, Consistency) ->
   case prepare_statement(Id, Cql, Args) of
     {ok, Prep} ->
@@ -218,15 +238,18 @@ handle_call({prepare, Cql}, _From, State0) ->
   )
   ,{reply, recv_frame(Cql), State1}
 ;
-handle_call({query_batch, Statement, ListOfArgs, Consistency}, _From, State) ->
-   State1 = wait_async(State)
-  ,execute_batch(Statement, ListOfArgs, Consistency, State1)
-  ,{reply, recv_frame(Statement), State1#state{async_laststmt = Statement}}
-;
-handle_call({query_batch_async, Cql, ListOfArgs, Consistency}, _From, State) ->
+handle_call({query_batch_async, Cql, ListOfArgs, Consistency, Type}, _From, State) ->
    State1 = #state{async_pending = Pending} = wait_async(State, ?MAX_PENDING_BATCH)
-  ,execute_batch(Cql, ListOfArgs, Consistency, State1)
-  ,{reply, ok, State1#state{async_pending = Pending + 1, async_laststmt = Cql, async_start = erlang:timestamp()}}
+  ,case Type of
+    logged ->
+       execute_batch(Cql, ListOfArgs, Consistency, 0, State1)
+      ,{reply, ok, State1#state{async_pending = Pending + 1, async_laststmt = Cql, async_start = erlang:timestamp()}}
+    ;
+    unlogged ->
+       execute_batch(Cql, ListOfArgs, Consistency, 1, State1)
+      ,{reply, ok, State1}
+    %~
+  end
 ;
 handle_call(release, _From, State = #state{monitor_ref = undefined}) ->
    {reply, {error, already_released}, State}
@@ -285,6 +308,18 @@ code_change(_ ,State ,_) ->
 %%-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 
 %%------------------------------------------------------------------------------
+consistency_to_int(one) -> 16#0001;
+consistency_to_int(two) -> 16#0002;
+consistency_to_int(three) -> 16#0003;
+consistency_to_int(quorum) -> 16#0004;
+consistency_to_int(all) -> 16#0005;
+consistency_to_int(local_quorum) -> 16#0006;
+consistency_to_int(each_quorum) -> 16#0007;
+consistency_to_int(serial) -> 16#0008;
+consistency_to_int(local_serial) -> 16#0009;
+consistency_to_int(local_one) -> 16#000A.
+
+%%------------------------------------------------------------------------------
 wait_async(State) ->
   wait_async(State, 0)
 .
@@ -300,7 +335,7 @@ wait_async(State = #state{async_pending = Pending}, _Allowed) ->
 
 %%------------------------------------------------------------------------------
 log(ResponseOpCode, Body, State = #state{async_laststmt = Cql, async_start = Begin}) ->
-   Time = case Begin of
+  Time = case Begin of
     undefined -> -1;
     _ -> timer:now_diff(erlang:timestamp(), Begin)
   end
@@ -366,13 +401,12 @@ execute_batch(
    #preparedstatement{id = Id, metadata = #metadata{columnspecs = {_, RequestTypes}}}
   ,ListOfArgs
   ,Consistency
+  ,Type
   ,State
 ) ->
    Query = [
-     <<
-       1:?T_UINT8 % type == 'unlogged'
-      ,(length(ListOfArgs)):?T_UINT16
-     >>
+       Type
+      ,<<(length(ListOfArgs)):?T_UINT16>>
     | wire_batch(Id, ListOfArgs, Consistency, RequestTypes)
    ]
   ,send_frame(State, ?OP_BATCH, Query)

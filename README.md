@@ -31,16 +31,16 @@ query for execution.
 
 Consistency is the consistency level. The valid values are:
 
-* `?CL_ONE` - Consistency level one.
-* `?CL_TWO` - Consistency level two.
-* `?CL_THREE` - Consistency level three.
-* `?CL_QUORUM` - Consistency level quorum.
-* `?CL_ALL` - Consistency level quorum.
-* `?CL_LOCAL_QUORUM` - Consistency level local quorum.
-* `?CL_EACH_QUORUM` - Consistency level each quorum.
-* `?CL_SERIAL` - Consistency level serial.
-* `?CL_LOCAL_SERIAL` - Consistency level local serial.
-* `?CL_LOCAL_ONE` - Consistency level local one.
+* `one` - Consistency level one.
+* `two` - Consistency level two.
+* `three` - Consistency level three.
+* `quorum` - Consistency level quorum.
+* `all` - Consistency level quorum.
+* `local_quorum` - Consistency level local quorum.
+* `each_quorum` - Consistency level each quorum.
+* `serial` - Consistency level serial.
+* `local_serial` - Consistency level local serial.
+* `local_one` - Consistency level local one.
 
 `ecql:execute/1,2,3`
 ------------------
@@ -66,9 +66,7 @@ Todo List (open for contributions)
 
 * SSL
 * Be more resilent to cassandra disconnects restarts.
-* Username / Password Auth
 * Support for some data types like boolean, decimal, double, timeuuid, inet is
 incomplete.
 * Replace encode and decode functions with nifs for performance.
-* Handle connections to different servers.
 

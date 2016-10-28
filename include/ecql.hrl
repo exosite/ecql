@@ -40,16 +40,16 @@
 
 -define(ER_UNPREPARED ,16#2500).
 
--define(CL_ONE, 16#0001).
--define(CL_TWO, 16#0002).
--define(CL_THREE, 16#0003).
--define(CL_QUORUM, 16#0004).
--define(CL_ALL, 16#0005).
--define(CL_LOCAL_QUORUM, 16#0006).
--define(CL_EACH_QUORUM, 16#0007).
--define(CL_SERIAL, 16#0008).
--define(CL_LOCAL_SERIAL, 16#0009).
--define(CL_LOCAL_ONE, 16#000A).
+-define(CL_ONE, one).
+-define(CL_TWO, two).
+-define(CL_THREE, three).
+-define(CL_QUORUM, quorum).
+-define(CL_ALL, all).
+-define(CL_LOCAL_QUORUM, local_quorum).
+-define(CL_EACH_QUORUM, each_quorum).
+-define(CL_SERIAL, serial).
+-define(CL_LOCAL_SERIAL, local_serial).
+-define(CL_LOCAL_ONE, local_one).
 
 -define(CACHE_SLICES_TUPLE, {
   ecql_cache_1, ecql_cache_2, ecql_cache_3, ecql_cache_4, ecql_cache_5
