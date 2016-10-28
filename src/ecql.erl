@@ -16,7 +16,6 @@
 -define(DUPLICATE_INDEX, 8704).
 % Compare default settings with CASSANDRA-5727
 -define(COMPACTION, "compaction = {'class': 'LeveledCompactionStrategy', 'sstable_size_in_mb': 160}").
--define(CL_DEFAULT, local_quorum).
 -define(RECONNECT_INTERVALL, 5000).
 
 %% OTP application
@@ -54,6 +53,7 @@
   ,execute_async/3
   ,execute_batch/2
   ,execute_batch/3
+  ,execute_batch/4
   ,eval/1
   ,eval_all/1
   ,quote/1
@@ -330,12 +330,12 @@ config(Key, Value) ->
 %%    Fun = fun(Row, Acc) -> ... end
 %%------------------------------------------------------------------------------
 foldl(Fun, Acc, Cql) ->
-  foldl(Fun, Acc, Cql, [], ?CL_DEFAULT)
+  foldl(Fun, Acc, Cql, [], default)
 .
 
 %%------------------------------------------------------------------------------
 foldl(Fun, Acc, Cql, Args) ->
-  foldl(Fun, Acc, Cql, Args, ?CL_DEFAULT)
+  foldl(Fun, Acc, Cql, Args, default)
 .
 
 %%------------------------------------------------------------------------------
@@ -351,12 +351,12 @@ foldl(Fun, Acc, Cql, Args, Consistency) ->
 %%    Fun = fun(Keys, Rows, Acc) -> ... end
 %%------------------------------------------------------------------------------
 foldl_page(Fun, Acc, Cql) ->
-  foldl_page(Fun, Acc, Cql, [], ?CL_DEFAULT)
+  foldl_page(Fun, Acc, Cql, [], default)
 .
 
 %%------------------------------------------------------------------------------
 foldl_page(Fun, Acc, Cql, Args) ->
-  foldl_page(Fun, Acc, Cql, Args, ?CL_DEFAULT)
+  foldl_page(Fun, Acc, Cql, Args, default)
 .
 
 %%------------------------------------------------------------------------------
@@ -366,12 +366,12 @@ foldl_page(Fun, Acc, Cql, Args, Consistency) ->
 
 %%------------------------------------------------------------------------------
 foreach(Fun, Cql) ->
-  foreach(Fun, Cql, [], ?CL_DEFAULT)
+  foreach(Fun, Cql, [], default)
 .
 
 %%------------------------------------------------------------------------------
 foreach(Fun, Cql, Args) ->
-  foreach(Fun, Cql, Args, ?CL_DEFAULT)
+  foreach(Fun, Cql, Args, default)
 .
 
 %%------------------------------------------------------------------------------
@@ -399,12 +399,12 @@ release() ->
 
 %%------------------------------------------------------------------------------
 select_value(Cql) ->
-  select_value(Cql, [], ?CL_DEFAULT)
+  select_value(Cql, [], default)
 .
 
 %%------------------------------------------------------------------------------
 select_value(Cql, Args) ->
-  select_value(Cql, Args, ?CL_DEFAULT)
+  select_value(Cql, Args, default)
 .
 
 %%------------------------------------------------------------------------------
@@ -421,12 +421,12 @@ select_value(Cql, Args, Consistency) ->
 
 %%------------------------------------------------------------------------------
 select_firstpage(Cql) ->
-  select_firstpage(Cql, [], ?CL_DEFAULT)
+  select_firstpage(Cql, [], default)
 .
 
 %%------------------------------------------------------------------------------
 select_firstpage(Cql, Args) ->
-  select_firstpage(Cql, Args, ?CL_DEFAULT)
+  select_firstpage(Cql, Args, default)
 .
 
 %%------------------------------------------------------------------------------
@@ -441,17 +441,17 @@ select_nextpage(Continuation) ->
 
 %%------------------------------------------------------------------------------
 select_column(Cql) ->
-  select_column(Cql, 1, [], ?CL_DEFAULT)
+  select_column(Cql, 1, [], default)
 .
 
 %%------------------------------------------------------------------------------
 select_column(Cql, Col) ->
-  select_column(Cql, Col, [], ?CL_DEFAULT)
+  select_column(Cql, Col, [], default)
 .
 
 %%------------------------------------------------------------------------------
 select_column(Cql, Col, Args) ->
-  select_column(Cql, Col, Args, ?CL_DEFAULT)
+  select_column(Cql, Col, Args, default)
 .
 
 %%------------------------------------------------------------------------------
@@ -462,10 +462,10 @@ select_column(Cql, Col, Args, Consistency) ->
 
 %%------------------------------------------------------------------------------
 select(Cql) ->
-  execute(Cql, [] ,?CL_DEFAULT)
+  execute(Cql, [] ,default)
 .
 select(Cql, Args) ->
-  execute(Cql, Args ,?CL_DEFAULT)
+  execute(Cql, Args ,default)
 .
 select(Cql, Args ,Consistency) ->
   execute(Cql, Args ,Consistency)
@@ -481,7 +481,7 @@ execute(Cql) ->
   execute(Cql, [])
 .
 execute(Cql, Args) ->
-  execute(Cql, Args, ?CL_DEFAULT)
+  execute(Cql, Args, default)
 .
 execute(Cql, Args, Consistency) ->
   with_stream_do(query, [Cql, Args, Consistency])
@@ -492,7 +492,7 @@ execute_async(Cql) ->
   execute_async(Cql, [])
 .
 execute_async(Cql, Args) ->
-  execute_async(Cql, Args, ?CL_DEFAULT)
+  execute_async(Cql, Args, default)
 .
 execute_async(Cql, Args, Consistency) ->
   with_stream_do(query_async, [Cql, Args, Consistency])
@@ -500,13 +500,16 @@ execute_async(Cql, Args, Consistency) ->
 
 %%------------------------------------------------------------------------------
 execute_batch(Cql, ListOfArgs) ->
-  execute_batch(Cql, ListOfArgs, ?CL_DEFAULT)
+  execute_batch(Cql, ListOfArgs, default)
 .
-execute_batch(_Cql, [], _Consistency) ->
+execute_batch(Cql, ListOfArgs, Consistency) ->
+  execute_batch(Cql, ListOfArgs, unlogged, Consistency)
+.
+execute_batch(_Cql, [], _Type, _Consistency) ->
   ok
 ;
-execute_batch(Cql, ListOfArgs, Consistency) ->
-  with_stream_do(query_batch, [Cql, ListOfArgs, Consistency])
+execute_batch(Cql, ListOfArgs, Type, Consistency) ->
+  with_stream_do(query_batch, [Cql, ListOfArgs, Type, Consistency])
 .
 
 %%------------------------------------------------------------------------------

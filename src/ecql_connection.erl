@@ -201,12 +201,13 @@ waitforframe() ->
   waitforframe(<<>>)
 .
 % TODO ADD FLAGS
-waitforframe(<<?VS_RESPONSE, 0, StreamId:?T_INT16, OpCode, Length:?T_UINT32, FrameBody:Length/binary, Rest/binary>>) ->
-  {#frame{stream=StreamId, opcode=OpCode, body=FrameBody}, Rest}
+waitforframe(<<?VS_RESPONSE, Flags, StreamId:?T_INT16, OpCode, Length:?T_UINT32, FrameBody:Length/binary, Rest/binary>>) ->
+  {#frame{stream=StreamId, opcode=OpCode, body=FrameBody, flags=Flags}, Rest}
 ;
-waitforframe(<<?VS_RESPONSE, 0, StreamId:?T_INT16, OpCode, Length:?T_UINT32, PartialFrameBody/binary>>) ->
+waitforframe(<<?VS_RESPONSE, Flags, StreamId:?T_INT16, OpCode, Length:?T_UINT32, PartialFrameBody/binary>>) ->
    <<FrameBody:Length/binary, Rest/binary>> = waitforframe(Length, [PartialFrameBody])
-  ,{#frame{stream=StreamId, opcode=OpCode, body=FrameBody}, Rest}
+  ,Flags =/= 0 andalso io:format("ohoh: ~p~n", [{#frame{stream=StreamId, opcode=OpCode, body=FrameBody, flags=Flags}}])
+  ,{#frame{stream=StreamId, opcode=OpCode, body=FrameBody, flags=Flags}, Rest}
 ;
 waitforframe(IncompleteHeader) ->
   receive {tcp, _Socket, Data} ->

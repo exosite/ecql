@@ -13,7 +13,7 @@
    foldl/6
   ,query/4
   ,query_async/4
-  ,query_batch/4
+  ,query_batch/5
   ,query_page/2
   ,query_page/4
   ,release/1
@@ -124,17 +124,17 @@ query_async({_, Pid} = Id, Cql, Args, Consistency) ->
 .
 
 %%------------------------------------------------------------------------------
-query_batch(Id, Cql, ListOfArgs, Consistency) ->
-  query_batch(Id, Cql, ListOfArgs, logged, Consistency)
-.
-query_batch(_, _, [], _, _) ->
-  ok
-;
 query_batch(Id, Cql, ListOfArgs, Type, Consistency) when is_atom(Consistency) ->
   query_batch(Id, Cql, ListOfArgs, Type, consistency_to_int(Consistency))
 ;
+query_batch(Id, Cql, ListOfArgs, logged, Consistency) ->
+  query_batch(Id, Cql, ListOfArgs, 0, Consistency)
+;
+query_batch(Id, Cql, ListOfArgs, unlogged, Consistency) ->
+  query_batch(Id, Cql, ListOfArgs, 1, Consistency)
+;
 query_batch(Id, Cql, ListOfArgs, Type, Consistency)
-  when Type == logged orelse Type == unlogged
+
 ->
   case prepare_statement(Id, Cql, ListOfArgs) of
     {ok, Prep} ->
@@ -240,16 +240,8 @@ handle_call({prepare, Cql}, _From, State0) ->
 ;
 handle_call({query_batch_async, Cql, ListOfArgs, Consistency, Type}, _From, State) ->
    State1 = #state{async_pending = Pending} = wait_async(State, ?MAX_PENDING_BATCH)
-  ,case Type of
-    logged ->
-       execute_batch(Cql, ListOfArgs, Consistency, 0, State1)
-      ,{reply, ok, State1#state{async_pending = Pending + 1, async_laststmt = Cql, async_start = erlang:timestamp()}}
-    ;
-    unlogged ->
-       execute_batch(Cql, ListOfArgs, Consistency, 1, State1)
-      ,{reply, ok, State1}
-    %~
-  end
+  ,execute_batch(Cql, ListOfArgs, Consistency, Type, State1)
+  ,{reply, ok, State1#state{async_pending = Pending + 1, async_laststmt = Cql, async_start = erlang:timestamp()}}
 ;
 handle_call(release, _From, State = #state{monitor_ref = undefined}) ->
    {reply, {error, already_released}, State}
@@ -308,6 +300,7 @@ code_change(_ ,State ,_) ->
 %%-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 
 %%------------------------------------------------------------------------------
+consistency_to_int(default) -> consistency_to_int(local_quorum);
 consistency_to_int(one) -> 16#0001;
 consistency_to_int(two) -> 16#0002;
 consistency_to_int(three) -> 16#0003;

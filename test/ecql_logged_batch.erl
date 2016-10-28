@@ -1,9 +1,9 @@
 %%==============================================================================
 %% Copyright (c) Exosite LLC
 %%
-%% ecql_batch.erl - Connector
+%% ecql_logged_batch.erl - Connector
 %%==============================================================================
--module(ecql_batch).
+-module(ecql_logged_batch).
 -export([
   init/1
  ,test/1
@@ -16,7 +16,7 @@ init(_Inserts) ->
 
 test(Inserts) ->
    Values = [[Each, Each] || Each <- lists:seq(1, Inserts)]
-  ,ecql:execute_batch("INSERT INTO record_name (a, b) VALUES(?, ?)", Values)
+  ,ecql:execute_batch("INSERT INTO record_name (a, b) VALUES(?, ?)", Values, logged, default)
 .
 
 %%==============================================================================

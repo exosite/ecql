@@ -31,6 +31,8 @@ query for execution.
 
 Consistency is the consistency level. The valid values are:
 
+* `default` - Alias for local_quorum and default value when no consistency is 
+              provied.
 * `one` - Consistency level one.
 * `two` - Consistency level two.
 * `three` - Consistency level three.
