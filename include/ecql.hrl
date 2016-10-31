@@ -31,6 +31,8 @@
 -define(T_INT16,  16/big-signed-integer).
 -define(T_INT32,  32/big-signed-integer).
 -define(T_INT64,  64/big-signed-integer).
+-define(T_FLOAT,  32/big-signed-float).
+-define(T_DOUBL,  64/big-signed-float).
 
 -define(RT_VOID, 1:?T_INT32).
 -define(RT_ROWS, 2:?T_INT32).

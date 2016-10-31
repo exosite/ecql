@@ -133,6 +133,9 @@ query_batch(Id, Cql, ListOfArgs, logged, Consistency) ->
 query_batch(Id, Cql, ListOfArgs, unlogged, Consistency) ->
   query_batch(Id, Cql, ListOfArgs, 1, Consistency)
 ;
+query_batch(Id, Cql, ListOfArgs, counter, Consistency) ->
+  query_batch(Id, Cql, ListOfArgs, 2, Consistency)
+;
 query_batch(Id, Cql, ListOfArgs, Type, Consistency)
 
 ->
@@ -847,9 +850,13 @@ convert(5, Value) ->
 % 0x0006    Decimal
 % NOPE
 % 0x0007    Double
-% NOPE
+convert(7, Value) ->
+  convert_float(Value)
+;
 % 0x0008    Float
-% NOPE
+convert(8, Value) ->
+  convert_float(Value)
+;
 % 0x0009    Int
 convert(9, Value) ->
   convert_int(Value)
@@ -875,6 +882,14 @@ convert(14, Value) ->
 % NOPE
 % 0x0010    Inet
 % NOPE
+% 0x0013    Smallint
+convert(19, Value) ->
+  convert_int(Value)
+;
+% 0x0014    Tinyint
+convert(20, Value) ->
+  convert_int(Value)
+;
 % 0x0020    List: the value is an [option], representing the type
 %                of the elements of the list.
 convert({list, ValueType}, <<Count:?T_UINT16, Body/binary>>) ->
@@ -897,10 +912,24 @@ convert({set, ValueType}, Binary) ->
 .
 
 %%------------------------------------------------------------------------------
+convert_float(<<Value:?T_DOUBL>>) ->
+   Value
+;
+convert_float(<<Value:?T_FLOAT>>) ->
+   Value
+.
+
+%%------------------------------------------------------------------------------
 convert_int(<<Value:?T_INT64>>) ->
    Value
 ;
 convert_int(<<Value:?T_INT32>>) ->
+   Value
+;
+convert_int(<<Value:?T_INT16>>) ->
+   Value
+;
+convert_int(<<Value:?T_INT8>>) ->
    Value
 .
 
@@ -983,9 +1012,13 @@ wire_value(5, Value) ->
 % 0x0006    Decimal
 % NOPE
 % 0x0007    Double
-% NOPE
+wire_value(7, Value) ->
+  <<Value:?T_DOUBL>>
+;
 % 0x0008    Float
-% NOPE
+wire_value(8, Value) ->
+  <<Value:?T_FLOAT>>
+;
 % 0x0009    Int
 wire_value(9, Value) ->
   wire_int(Value)
@@ -1014,9 +1047,13 @@ wire_value(14, Value) ->
 % 0x0012    Time
 % NOPE
 % 0x0013    Smallint
-% NOPE
+wire_value(19, Value) ->
+  <<Value:?T_INT16>>
+;
 % 0x0014    Tinyint
-% NOPE
+wire_value(20, Value) ->
+  <<Value:?T_INT8>>
+;
 % 0x0020    List: the value is an [option], representing the type
 %                of the elements of the list.
 wire_value({list, ValueType}, Values) when is_list(Values) ->
