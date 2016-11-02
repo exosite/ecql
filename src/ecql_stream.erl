@@ -826,7 +826,9 @@ convert(_, undefined) ->
 ;
 % 0x0001    Ascii
 convert(1, Value) ->
-  binary_to_list(Value)
+  % Change for Elixir string as binary semantic
+  % binary_to_list(Value)
+  Value
 ;
 % 0x0002    Bigint
 convert(2, Value) ->
@@ -872,7 +874,9 @@ convert(12, Value) ->
 % NOPE
 % 0x000D    Varchar
 convert(13, Value) ->
-  binary_to_list(Value)
+  % Change for Elixir string as binary semantic
+  % binary_to_list(Value)
+  Value
 ;
 % 0x000E    Varint
 convert(14, Value) ->
