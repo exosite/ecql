@@ -163,53 +163,43 @@ data_centers("NetworkTopologyStrategy" = S, [{Name, Factor} | Rest]) ->
 .
 
 %%------------------------------------------------------------------------------
-repair_connection_pool(OldPool, Configuration) ->
-   Count = proplists:get_value(connections_per_host, Configuration, 4)
-  ,Hosts = proplists:get_value(hosts, Configuration, [])
-  ,list_to_tuple(add_hosts(Hosts, Count, [], tuple_to_list(OldPool), Configuration))
+repair_connection_pool(OldPoolTuple, Configuration) ->
+   NewHosts = sets:from_list(proplists:get_value(hosts, Configuration, []))
+  ,OldPool = tuple_to_list(OldPoolTuple)
+  ,OldHosts = sets:from_list([Host || {Host, _Conn} <- OldPool])
+  ,AllHosts = sets:union(NewHosts, OldHosts)
+  % Iterating the total list and decide to a) keep b) add or c) remove
+  ,list_to_tuple(sets:fold(fun(Host, NewPool) ->
+    case sets:is_element(Host, NewHosts) of
+      true ->
+        case sets:is_element(Host, OldHosts) of
+          % Case a) keep
+          true ->
+            [lists:keyfind(Host, 1, OldHosts) | NewPool]
+          ;
+          % Case a) add new connection
+          false ->
+            [add_connection(Host, Configuration) | NewPool]
+          %~
+        end
+      ;
+      % Case c) remove old connection
+      false ->
+         {Host, OldConn} = lists:keyfind(Host, 1, OldHosts)
+        ,is_alive(OldConn) andalso ecql_connection:stop(OldConn)
+        ,NewPool
+      %~
+    end
+  end, [], AllHosts))
 .
 
 %%------------------------------------------------------------------------------
-add_hosts([], _Count, NewPool, OldPool, _Configuration) ->
-  [ecql_connection:stop(OldConn) ||
-     {_, OldConn} <- OldPool
-    ,erlang:is_pid(OldConn)
-    ,erlang:is_process_alive(OldConn)
-  ]
-  ,NewPool
-;
-add_hosts([Host | Hosts], Count, NewPool, OldPool0, Configuration) ->
-   {OldConnPool0, OldPool} = lists:partition(fun({OldHost, _}) -> OldHost == Host end, OldPool0)
-  ,OldConnPool = [OldConn ||
-     {OldHost, OldConn} <- OldConnPool0
-    ,OldHost == Host
-    ,erlang:is_pid(OldConn)
-    ,erlang:is_process_alive(OldConn)
-  ]
-  ,add_hosts(
-     Hosts
-    ,Count
-    ,add_host(Host, Count, NewPool, OldConnPool, Configuration)
-    ,OldPool
-    ,Configuration
-  )
+is_alive(Pid) ->
+  erlang:is_pid(Pid) andalso erlang:is_process_alive(Pid)
 .
 
 %%------------------------------------------------------------------------------
-add_host(_Host, 0, NewPool, OldConnPool, _Configuration) ->
-   [ecql_connection:stop(OldConn) || {_, OldConn} <- OldConnPool]
-  ,NewPool
-;
-add_host(Host, N, NewPool0, [], Configuration) ->
-   NewPool = add_connection(Host, Configuration, NewPool0)
-  ,add_host(Host, N - 1, NewPool, [], Configuration)
-;
-add_host(Host, N, NewPool, [OldConn | OldConnPool], Configuration) ->
-   add_host(Host, N - 1, [{Host, OldConn} | NewPool], OldConnPool, Configuration)
-.
-
-%%------------------------------------------------------------------------------
-add_connection(Host, Configuration, NewPool) ->
+add_connection(Host, Configuration) ->
   case ecql_connection:start_link(Host, Configuration) of
     {ok, Connection} ->
        Keyspace = proplists:get_value(keyspace, Configuration, "ecql")
@@ -217,11 +207,11 @@ add_connection(Host, Configuration, NewPool) ->
          fun(Pid) -> init_query({Host, Pid}, ["USE ", Keyspace]) end
         ,ecql_connection:get_streams(Connection)
       )
-      ,[{Host, Connection} | NewPool]
+      ,{Host, Connection}
     ;
     Error ->
-       Error
-      ,NewPool
+       error_logger:error_msg("ecql: Failed connecting to: ~p: ~p~n", [Host, Error])
+      ,Error
     %~
   end
 .

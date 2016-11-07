@@ -63,7 +63,7 @@ init({{Host, Port}, Configuration}) ->
   ,User = proplists:get_value(user, Configuration, "cassandra")
   ,Pass = proplists:get_value(pass, Configuration, "cassandra")
   ,ok = auth(waitforframe(), User, Pass, Socket)
-  ,PoolSize = proplists:get_value(streams_per_connection, Configuration, 25)
+  ,PoolSize = proplists:get_value(streams_per_connection, Configuration, 100)
   ,{ok, Sender} = ecql_sender:start_link(Socket)
   ,Pool = init_pool(PoolSize, Sender)
   ,{ok, #state{
