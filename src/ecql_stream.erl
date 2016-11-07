@@ -5,8 +5,10 @@
 %%==============================================================================
 -module(ecql_stream).
 -behaviour(gen_server).
--compile(native).
--compile({hipe, [o3]}).
+-compile(inline).
+-compile({inline_size,   100}).
+-on_load(init/0).
+
 
 %% Public API
 -export([
@@ -207,6 +209,25 @@ release({_, Pid}) ->
 %%------------------------------------------------------------------------------
 sync({_, Pid}) ->
   gen_server:call(Pid, sync, ?TIMEOUT)
+.
+
+%%-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+%% Private loading
+%%-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+
+%%------------------------------------------------------------------------------
+init() ->
+  PrivDir = case code:priv_dir(?MODULE) of
+    {error, bad_name} ->
+       EbinDir = filename:dirname(code:which(?MODULE))
+      ,AppPath = filename:dirname(EbinDir)
+      ,filename:join(AppPath, "priv")
+    ;
+    Path ->
+      Path
+    %~
+  end
+  ,erlang:load_nif(filename:join(PrivDir, ecql_stream), 0)
 .
 
 %%-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=

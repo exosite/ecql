@@ -3,11 +3,13 @@
 %%
 %% ecql_stream.erl - Handler for one ongoing ecql stream
 %%==============================================================================
--module(ecql_decoding_5_5).
--compile(inline).
--compile({inline_size,   500}).    %% default=24
--compile({inline_effort, 500}).   %% default=150
--compile({inline_unroll, 5}).
+-module(ecql_decoding_1_5).
+-compile(native).
+-compile({hipe,[o3]}).
+%~ -compile(inline).
+%~ -compile({inline_size,   500}).    %% default=24
+%~ -compile({inline_effort, 500}).   %% default=150
+%~ -compile({inline_unroll, 5}).
 
 -include("common.hrl").
 
