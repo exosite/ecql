@@ -724,11 +724,6 @@ read_bytes(<<Len:?T_INT32, Rest/binary>>) when Len < 0 ->
 .
 
 %%------------------------------------------------------------------------------
-read_short(<<Value:?T_UINT16, Rest/binary>>) ->
-  {Value, Rest}
-.
-
-%%------------------------------------------------------------------------------
 % [short bytes]  A [short] n, followed by n bytes if n >= 0.
 read_sbytes(<<Len:?T_UINT16, Value:Len/binary, Rest/binary>>) ->
   {Value, Rest}
@@ -741,8 +736,8 @@ read_colspec(<<Len:?T_INT16, Name:Len/binary, Type:?T_INT16, Rest/binary>>) ->
   ,{{binary_to_atom(Name, utf8), TypeDef}, Rest2}
 .
 
-%%------------------------------------------------------------------------------
 
+%%------------------------------------------------------------------------------
 read_colspec_type(0, _) ->
   undefined
 ;
@@ -763,33 +758,54 @@ read_colspec_type(Type, Rest) ->
   {Type, Rest}
 .
 
+
+%%-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+%% START OF PROTOCOL SPLIT
+%% Native Protocol V4 Only
+%%-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+-ifndef(native_protocol_3).
+
 %%------------------------------------------------------------------------------
-read_metadata(<<Flags:?T_INT32, ColCount:?T_INT32, PkCount:?T_INT32, Body0/binary>>) ->
-   {Pks, Body1} = readn(PkCount, Body0, fun read_short/1)
-  ,read_metadata(#metadata{flags = Flags, pk_index = Pks}, ColCount, Body1)
-.
-% table spec per column
-read_metadata(M = #metadata{flags = 0}, ColCount, Body) ->
-   {ColSpecs, Rest} = readn(ColCount, Body, fun(ColSpecBin) ->
-     {_TableSpec, ColSpecBinRest0} = read_tablespec(ColSpecBin)
-    ,read_colspec(ColSpecBinRest0)
-   end)
-  ,{M#metadata{columnspecs = format_specs(ColSpecs)}, Rest}
-;
-% global table spec only once
-read_metadata(M = #metadata{flags = 1}, ColCount, Body) ->
-   {_TableSpec, Rest0} = read_tablespec(Body)
-  ,{ColSpecs, Rest1} = readn(ColCount, Rest0, fun read_colspec/1)
-  ,{M#metadata{columnspecs = format_specs(ColSpecs)}, Rest1}
+read_short(<<Value:?T_UINT16, Rest/binary>>) ->
+  {Value, Rest}
 .
 
 %%------------------------------------------------------------------------------
+read_primary_keys(<<PkCount:?T_INT32, Body/binary>>) ->
+  % Returns {Pks, Rest}
+  readn(PkCount, Body, fun read_short/1)
+.
+
+%%------------------------------------------------------------------------------
+read_metadata(<<Flags:?T_INT32, ColCount:?T_INT32, Body0/binary>>) ->
+   {Pks, Body1} = read_primary_keys(Body0)
+  ,{Meta, Body2} = read_result_metadata(Flags, <<>>, ColCount, Body1)
+  ,{Meta#metadata{pk_index = Pks}, Body2}
+.
+
+-else.
+%%-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+%% Native Protocol V3 Only
+%%-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+
+%%------------------------------------------------------------------------------
+read_metadata(Bin) ->
+   read_result_metadata(Bin)
+.
+
+-endif.
+
+%%-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+%% END OF PROTOCOL SPLIT
+%%-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+
+%%------------------------------------------------------------------------------
 read_result_metadata(<<Flag0:?T_INT32, ColCount:?T_INT32, Body0/binary>>) ->
-   {Flag1, PageState, Body1} = retrieve_pagestate(<<Flag0:32>>, Body0)
+   {Flag1, PageState, Body1} = retrieve_pagestate(Flag0, Body0)
   ,read_result_metadata(Flag1, PageState, ColCount, Body1)
 .
 % table spec per column
-read_result_metadata(<<0:?T_INT32>>, PageState, ColCount, Body) ->
+read_result_metadata(0, PageState, ColCount, Body) ->
    {ColSpecs, Rest} = readn(ColCount, Body, fun(ColSpecBin) ->
      {_TableSpec, ColSpecBinRest0} = read_tablespec(ColSpecBin)
     ,read_colspec(ColSpecBinRest0)
@@ -798,18 +814,18 @@ read_result_metadata(<<0:?T_INT32>>, PageState, ColCount, Body) ->
     ,paging_state = PageState}, Rest}
 ;
 % global table spec only once
-read_result_metadata(<<1:?T_INT32>>, PageState, ColCount, Body) ->
+read_result_metadata(1, PageState, ColCount, Body) ->
    {_TableSpec, Rest0} = read_tablespec(Body)
   ,{ColSpecs, Rest1} = readn(ColCount, Rest0, fun read_colspec/1)
   ,{#metadata{flags = 1, columnspecs = format_specs(ColSpecs)
     ,paging_state = PageState}, Rest1}
 ;
 % no metadata
-read_result_metadata(<<4:?T_INT32>>, PageState, _ColCount, Body) ->
+read_result_metadata(4, PageState, _ColCount, Body) ->
   {#metadata{flags = 4, paging_state = PageState}, Body}
 ;
 % no metadata + global table spec is actually the same
-read_result_metadata(<<5:?T_INT32>>, PageState, _ColCount, Body) ->
+read_result_metadata(5, PageState, _ColCount, Body) ->
   {#metadata{flags = 5, paging_state = PageState}, Body}
 .
 
@@ -823,16 +839,12 @@ read_result_metadata(<<5:?T_INT32>>, PageState, _ColCount, Body) ->
 %%    If Has_more_page is set, Flag and Body will also be updated (remove
 %%    Has_more_page from Flag and remove paging_state from Body.)
 %%------------------------------------------------------------------------------
-retrieve_pagestate(<<Front:30, 1:1, Global:1>>, Body0) ->
-   {PageState, Body1} = retrieve_pagestate(Body0)
-  ,{<<Front:30, 0:1, Global:1>>, PageState, Body1}
+retrieve_pagestate(Flags, Body0) when (2 band Flags) == 2 ->
+   <<N:?T_INT32, PageState:N/binary, Body1/binary>> = Body0
+  ,{Flags bxor 2, <<N:?T_INT32, PageState:N/binary>>, Body1}
 ;
-retrieve_pagestate(<<Front:30, 0:1, Global:1>>, Body) ->
-  {<<Front:30, 0:1, Global:1>>, <<>>, Body}
-.
-
-retrieve_pagestate(<<N:?T_INT32, PageState:N/binary, Body/binary>>) ->
-  {<<N:?T_INT32, PageState/binary>>, Body}
+retrieve_pagestate(Flags, Body) ->
+  {Flags, <<>>, Body}
 .
 
 %%------------------------------------------------------------------------------

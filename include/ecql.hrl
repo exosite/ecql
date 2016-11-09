@@ -8,8 +8,13 @@
 -record(frame, {stream, opcode, body, flags}).
 
 %% Defines
+-ifndef(native_protocol_3).
 -define(VS_REQUEST, 4).
 -define(VS_RESPONSE, 132).
+-else.
+-define(VS_REQUEST, 3).
+-define(VS_RESPONSE, 131).
+-endif.
 
 -define(OP_ERROR, 0).
 -define(OP_STARTUP, 1).
