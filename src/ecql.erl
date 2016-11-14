@@ -601,7 +601,7 @@ with_stream_do(Function, Args) ->
 %%------------------------------------------------------------------------------
 log({error, Code, Message} = Ret, Function, Args) ->
   error_logger:error_msg(
-     "ecql_stream:~p(~p) failed: {error, ~p, ~s}~n"
+     "ecql_stream:~p(~p) failed: {error, ~p, ~p}~n"
     ,[Function, Args, Code, Message]
   )
   ,Ret

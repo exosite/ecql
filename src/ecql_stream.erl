@@ -260,7 +260,7 @@ handle_call({prepare, Cql}, _From, State0) ->
     ,?OP_PREPARE
     ,wire_longstring(Cql)
   )
-  ,{reply, recv_frame(Cql), State1}
+  ,{reply, block_handle_response(Cql), State1}
 ;
 handle_call({query_batch_async, Cql, ListOfArgs, Consistency, Type}, _From, State) ->
    State1 = #state{async_pending = Pending} = wait_async(State, ?MAX_PENDING_BATCH)
@@ -284,7 +284,7 @@ handle_cast({query_start, PageState, Statement, Args, Consistency} ,State0) ->
    State = wait_async(State0)
   ,{Time, Ret} = timer:tc(fun() ->
      execute_query(Statement, Args, Consistency, State, #paging{page_state = PageState})
-    ,recv_frame(Statement)
+    ,block_handle_response(Statement)
   end)
   ,ecql_log:log(Time, query, Statement, Args)
   ,{noreply, State#state{laststmt = Statement, lastresult = Ret}}
@@ -296,8 +296,9 @@ handle_cast(stop, State) ->
 
 %%------------------------------------------------------------------------------
 % Async message incoming
-handle_info({frame, ResponseOpCode, ResponseBody}, State = #state{async_pending = Pending}) ->
-   log(ResponseOpCode, ResponseBody, State)
+handle_info({frame, ResponseOpCode0, ResponseBody0, Flags}, State = #state{async_pending = Pending}) ->
+   {frame, ResponseOpCode, ResponseBody} = handle_flags(Flags, ResponseOpCode0, ResponseBody0)
+  ,log(ResponseOpCode, ResponseBody, State)
   ,{noreply, State#state{async_pending = Pending - 1}}
 ;
 handle_info({'DOWN', MonitorRef, _Type, _Object, _Info}, State = #state{connection = Conn, monitor_ref = MonitorRef}) ->
@@ -344,10 +345,9 @@ wait_async(State = #state{async_pending = Pending}, Allowed) when Pending =< All
   State
 ;
 wait_async(State = #state{async_pending = Pending}, _Allowed) ->
-   receive {frame, ResponseOpCode, ResponseBody} ->
-     log(ResponseOpCode, ResponseBody, State)
-    ,wait_async(State#state{async_pending = Pending - 1})
-   end
+   {frame, ResponseOpCode, ResponseBody} = receive_frame()
+  ,log(ResponseOpCode, ResponseBody, State)
+  ,wait_async(State#state{async_pending = Pending - 1})
 .
 
 %%------------------------------------------------------------------------------
@@ -530,10 +530,32 @@ send_frame(
 .
 
 %%------------------------------------------------------------------------------
-recv_frame(Statement) ->
-  receive {frame, ResponseOpCode, ResponseBody} ->
-     handle_response(ResponseOpCode, ResponseBody, Statement)
+block_handle_response(Statement) ->
+   {frame, ResponseOpCode, ResponseBody} = receive_frame()
+  ,handle_response(ResponseOpCode, ResponseBody, Statement)
+.
+
+%%------------------------------------------------------------------------------
+receive_frame() ->
+  receive {frame, ResponseOpCode, ResponseBody, Flags} ->
+    handle_flags(Flags, ResponseOpCode, ResponseBody)
   end
+.
+
+%%------------------------------------------------------------------------------
+handle_flags(0, ResponseOpCode, ResponseBody) ->
+  {frame, ResponseOpCode, ResponseBody}
+;
+% compression handle_flags(1, ResponseOpCode, ResponseBody)
+handle_flags(8, ResponseOpCode, ResponseBody) ->
+  {frame, ResponseOpCode, strip_warnings(ResponseBody)}
+.
+
+%%------------------------------------------------------------------------------
+strip_warnings(<<Len:?T_UINT16, Rest/binary>>) ->
+   {Errors, Rest1} = readn(Len, Rest, fun read_sbytes/1)
+  ,error_logger:warning_msg("received warnings: ~p~n", [Errors])
+  ,Rest1
 .
 
 %%------------------------------------------------------------------------------

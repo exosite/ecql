@@ -169,8 +169,8 @@ handle_data(<<>>, _) ->
   ok
 ;
 handle_data(Sofar, Pool) ->
-   {#frame{opcode = OpCode, body = Body, stream = StreamId}, Rest} = waitforframe(Sofar)
-  ,element(StreamId + 1, Pool) ! {frame, OpCode, Body}
+   {#frame{opcode = OpCode, body = Body, stream = StreamId, flags = Flags}, Rest} = waitforframe(Sofar)
+  ,element(StreamId + 1, Pool) ! {frame, OpCode, Body, Flags}
   ,handle_data(Rest, Pool)
 .
 
