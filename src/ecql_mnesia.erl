@@ -343,7 +343,7 @@ change_table_copy_type(_Schema,_This,_DiscCopies) ->
 clear_table(RecordName) when is_atom(RecordName) ->
   case ecql:execute(["TRUNCATE ", map_recordname(RecordName)]) of
      ok ->
-       ecql_cache:clear()
+       ecql_cache:match_clear({{RecordName, '_', '_'}, '_'})
       ,{atomic ,ok}
     ;
     Error ->
