@@ -13,6 +13,7 @@
   ,clear/0
   ,get/2
   ,dirty/1
+  ,match_clear/1
   ,set/2
   ,set_cache_size/1
   ,set_cluster_module/1
@@ -126,6 +127,19 @@ do_dirty(Key) ->
       undefined
     %~
   end
+.
+
+%%------------------------------------------------------------------------------
+match_clear(Pattern) when is_atom(Pattern); is_tuple(Pattern) ->
+  lists:foreach(
+    fun (Slice) ->
+       ets:match_delete(Slice, Pattern)
+    end
+   ,?CACHE_SLICES_LIST
+  )
+;
+match_clear(_) ->
+  ok
 .
 
 %%------------------------------------------------------------------------------
