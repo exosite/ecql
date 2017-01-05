@@ -13,6 +13,7 @@
   ,clear/0
   ,get/2
   ,dirty/1
+  ,local_match_clear/1
   ,match_clear/1
   ,set/2
   ,set_cache_size/1
@@ -130,16 +131,33 @@ do_dirty(Key) ->
 .
 
 %%------------------------------------------------------------------------------
-match_clear(Pattern) when is_atom(Pattern); is_tuple(Pattern) ->
+local_match_clear(Pattern) when is_atom(Pattern); is_tuple(Pattern) ->
   lists:foreach(
     fun (Slice) ->
-       ets:match_delete(Slice, Pattern)
+      case catch ets:match_delete(Slice, Pattern) of
+        {'EXIT', Error} ->
+           error_logger:error_msg(
+             "~p: local_match_clear error. pattern: ~p, error: ~p~n"
+            ,[?MODULE, Pattern, Error]
+           )
+        ;
+        _ ->
+           true
+        %~
+      end
     end
    ,?CACHE_SLICES_LIST
   )
 ;
-match_clear(_) ->
+local_match_clear(_) ->
   ok
+.
+
+%%------------------------------------------------------------------------------
+match_clear(Pattern) ->
+   ClusterModule = cluster_module()
+  ,gen_server:abcast(ClusterModule:nodes(), ?MODULE, {match_clear, Pattern})
+  ,local_match_clear(Pattern)
 .
 
 %%------------------------------------------------------------------------------
@@ -211,6 +229,9 @@ stop() ->
 %%------------------------------------------------------------------------------
 handle_call(stop, _From, State) ->
   {stop, normal, ok, State}
+;
+handle_call(_, _From, State) ->
+  {reply, unknown, State}
 .
 
 %%------------------------------------------------------------------------------
@@ -227,8 +248,15 @@ handle_cast({dirty, Key}, State) ->
   do_dirty(Key)
  ,{noreply, State}
 ;
+handle_cast({match_clear, Pattern}, State) ->
+  local_match_clear(Pattern)
+ ,{noreply, State}
+;
 handle_cast(terminate ,State) ->
   {stop ,terminated ,State}
+;
+handle_cast(_, State) ->
+  {noreply, State}
 .
 
 %%------------------------------------------------------------------------------
@@ -245,6 +273,9 @@ handle_info(timeout, State) ->
    % Who timed out?
    error_logger:error_msg("ecql_cache: Timeout occured~n")
   ,{noreply, State}
+;
+handle_info(_, State) ->
+   {noreply, State}
 .
 
 %%------------------------------------------------------------------------------
