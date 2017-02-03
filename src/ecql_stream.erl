@@ -1063,7 +1063,9 @@ wire_value(3, Value) ->
   Value
 ;
 % 0x0004    Boolean
-% NOPE
+wire_value(4, Value) ->
+  wire_boolean(Value)
+;
 % 0x0005    Counter
 wire_value(5, Value) ->
   wire_bigint(Value)
@@ -1143,6 +1145,14 @@ wire_value({set, ValueType}, Value) ->
 % NOPE
 % 0x0031    Tuple
 % NOPE
+
+%%------------------------------------------------------------------------------
+wire_boolean(true) ->
+  <<"True">>
+;
+wire_boolean(false) ->
+  <<"False">>
+.
 
 %%------------------------------------------------------------------------------
 wire_bigint(Value) ->
