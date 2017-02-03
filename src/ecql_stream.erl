@@ -898,11 +898,8 @@ convert1(3, Value) ->
    Value
 ;
 % 0x0004    Boolean
-convert1(4, <<0>>) ->
-  false
-;
-convert1(4, <<1>>) ->
-  true
+convert1(4, V) ->
+  V
 ;
 % 0x0005    Counter
 convert1(5, Value) ->
