@@ -875,66 +875,70 @@ format_specs(ColSpecs) ->
 .
 
 %%------------------------------------------------------------------------------
+convert(C,V) ->
+ R = convert1(C,V),
+ io:format("convert type ~p, value ~p, result ~p~n", [C,V,R])
+.
 % CQL null == undefined
-convert(_, undefined) ->
+convert1(_, undefined) ->
   undefined
 ;
 % 0x0001    Ascii
-convert(1, Value) ->
+convert1(1, Value) ->
   % Change for Elixir string as binary semantic
   % binary_to_list(Value)
   Value
 ;
 % 0x0002    Bigint
-convert(2, Value) ->
+convert1(2, Value) ->
   convert_int(Value)
 ;
 % 0x0003    Blob
-convert(3, Value) ->
+convert1(3, Value) ->
    Value
 ;
 % 0x0004    Boolean
-convert(4, <<0>>) ->
+convert1(4, <<0>>) ->
   false
 ;
-convert(4, <<1>>) ->
+convert1(4, <<1>>) ->
   true
 ;
 % 0x0005    Counter
-convert(5, Value) ->
+convert1(5, Value) ->
   convert_int(Value)
 ;
 % 0x0006    Decimal
 % NOPE
 % 0x0007    Double
-convert(7, Value) ->
+convert1(7, Value) ->
   convert_float(Value)
 ;
 % 0x0008    Float
-convert(8, Value) ->
+convert1(8, Value) ->
   convert_float(Value)
 ;
 % 0x0009    Int
-convert(9, Value) ->
+convert1(9, Value) ->
   convert_int(Value)
 ;
 % 0x000B    Timestamp
-convert(11, Value) ->
+convert1(11, Value) ->
   convert_int(Value)
 ;
 % 0x000C    Uuid
-convert(12, Value) ->
+convert1(12, Value) ->
   Value
 ;
 % NOPE
 % 0x000D    Varchar
-convert(13, Value) ->
+convert1(13, Value) ->
   % Change for Elixir string as binary semantic
   % binary_to_list(Value)
   Value
 ;
 % 0x000E    Varint
-convert(14, Value) ->
+convert1(14, Value) ->
   convert_int(Value)
 ;
 % 0x000F    Timeuuid
@@ -942,22 +946,22 @@ convert(14, Value) ->
 % 0x0010    Inet
 % NOPE
 % 0x0013    Smallint
-convert(19, Value) ->
+convert1(19, Value) ->
   convert_int(Value)
 ;
 % 0x0014    Tinyint
-convert(20, Value) ->
+convert1(20, Value) ->
   convert_int(Value)
 ;
 % 0x0020    List: the value is an [option], representing the type
 %                of the elements of the list.
-convert({list, ValueType}, <<Count:?T_UINT16, Body/binary>>) ->
+convert1({list, ValueType}, <<Count:?T_UINT16, Body/binary>>) ->
    {Values, <<>>} = readn(Count, Body, fun read_sbytes/1)
   ,lists:map(fun(Value) -> convert(ValueType, Value) end, Values)
 ;
 % 0x0021    Map: the value is two [option], representing the types of the
 %               keys and values of the map
-convert({map, {KeyType, ValueType}}, <<Count:?T_UINT16, Body/binary>>) ->
+convert1({map, {KeyType, ValueType}}, <<Count:?T_UINT16, Body/binary>>) ->
   {Values, <<>>} = readn(Count, Body, fun(BinRow) ->
      {[Key, Value], RowRest} = readn(2, BinRow, fun read_sbytes/1)
     ,{{convert(KeyType, Key), convert(ValueType, Value)}, RowRest}
@@ -966,7 +970,7 @@ convert({map, {KeyType, ValueType}}, <<Count:?T_UINT16, Body/binary>>) ->
 ;
 % 0x0022    Set: the value is an [option], representing the type
 %                of the elements of the set
-convert({set, ValueType}, Binary) ->
+convert1({set, ValueType}, Binary) ->
   convert({list, ValueType}, Binary)
 .
 
