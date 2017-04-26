@@ -175,7 +175,7 @@ repair_connection_pool(OldPoolTuple, Configuration) ->
         case sets:is_element(Host, OldHosts) of
           % Case a) keep
           true ->
-            [lists:keyfind(Host, 1, OldHosts) | NewPool]
+            [lists:keyfind(Host, 1, OldPool) | NewPool]
           ;
           % Case a) add new connection
           false ->
@@ -185,7 +185,7 @@ repair_connection_pool(OldPoolTuple, Configuration) ->
       ;
       % Case c) remove old connection
       false ->
-         {Host, OldConn} = lists:keyfind(Host, 1, OldHosts)
+         {Host, OldConn} = lists:keyfind(Host, 1, OldPool)
         ,is_alive(OldConn) andalso ecql_connection:stop(OldConn)
         ,NewPool
       %~
