@@ -73,10 +73,28 @@ get(Key, FunResult) ->
     {_Slice, Value} ->
       Value
     ;
+    {_Slice, dirty, _} ->
+      do_get(Key, FunResult)
+    ;
     undefined ->
-       incr_stat(empty)
-      ,do_set(Key, FunResult())
+      do_get(Key, FunResult)
     %~
+  end
+.
+do_get(Key, FunResult) ->
+  do_get(Key, FunResult, 1)
+.
+do_get(Key, FunResult, 10) ->
+  incr_stat(empty),
+  do_set(Key, FunResult()),
+  dirty(Key)
+;
+do_get(Key, FunResult, AttemptCount) ->
+  incr_stat(empty),
+  Ts = erlang:system_time(micro_seconds),
+  case do_set(Key, FunResult(), Ts) of
+    {ok, Value} -> Value;
+    {error, read_again} -> do_get(Key, FunResult, AttemptCount + 1)
   end
 .
 
@@ -121,8 +139,13 @@ dirty(Key) ->
 .
 do_dirty(Key) ->
   case find(Key) of
+    {Slice, dirty, _} ->
+      Ts = erlang:system_time(micro_seconds),
+      ets:insert(Slice, {Key, dirty, Ts})
+    ;
     {Slice, _Value} ->
-      ets:delete(Slice, Key)
+      Ts = erlang:system_time(micro_seconds),
+      ets:insert(Slice, {Key, dirty, Ts})
     ;
     undefined ->
       undefined
@@ -163,6 +186,10 @@ match_clear(Pattern) ->
 %%------------------------------------------------------------------------------
 set(Key, Result) ->
   case find(Key) of
+    {Slice, dirty, _} ->
+       ets:insert(Slice, {Key, Result})
+      ,Result
+    ;    
     {Slice, _Value} ->
        ets:insert(Slice, {Key, Result})
       ,Result
@@ -170,6 +197,20 @@ set(Key, Result) ->
     undefined ->
       do_set(Key, Result)
     %~
+  end
+.
+do_set(Key, Result, Timestamp) ->
+  case find(Key) of
+    {_Slice, dirty, DirtyTimestamp} ->
+      if DirtyTimestamp > Timestamp ->
+        {error, read_again}
+      ;
+      true ->
+        {ok, do_set(Key, Result)}
+      end
+    ;
+    _ ->
+      {ok, do_set(Key, Result)}
   end
 .
 do_set(Key, Result) ->
@@ -192,7 +233,6 @@ do_set(Key, Result) ->
   end
   ,Result
 .
-
 %%------------------------------------------------------------------------------
 set_cache_size(CacheSize) when is_integer(CacheSize) ->
   private_set(cache_size, CacheSize)
@@ -302,6 +342,9 @@ find(Key, [Slice | Rest]) ->
   case ets:lookup(Slice, Key) of
     [{Key, Value}] ->
       {Slice, Value}
+    ;
+    [{Key, dirty, Timestamp}] ->
+      {Slice, dirty, Timestamp}
     ;
     [] -> % [] or [Index, OtherKey, Value, Time]
       find(Key, Rest)
