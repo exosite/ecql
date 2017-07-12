@@ -204,13 +204,12 @@ set(Key, Result) ->
 do_set(Key, Result, Timestamp) ->
   case find(Key) of
     {_Slice, dirty, DirtyTimestamp} ->
-      io:format("dirty~n"),
       if DirtyTimestamp > Timestamp ->
-        io:format("read again~n"),
+        io:format("dirty mark is newer than direct read result~n - read again~n"),
         {error, read_again}
       ;
       true ->
-        io:format("dirty but result is newer than dirty timestamp~n"),
+        io:format("dirty but result is newer than dirty timestamp~n - overwrite dirty mark~n"),
         {ok, do_set(Key, Result)}
       end
     ;
