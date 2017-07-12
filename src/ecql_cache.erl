@@ -86,13 +86,15 @@ do_get(Key, FunResult) ->
 .
 do_get(Key, FunResult, 10) ->
   incr_stat(empty),
-  do_set(Key, FunResult()),
+  Result = FunResult(),
+  do_set(Key, Result),
   dirty(Key)
 ;
 do_get(Key, FunResult, AttemptCount) ->
   incr_stat(empty),
   Ts = erlang:system_time(micro_seconds),
-  case do_set(Key, FunResult(), Ts) of
+  Result = FunResult(),
+  case do_set(Key, Result, Ts) of
     {ok, Value} -> Value;
     {error, read_again} -> do_get(Key, FunResult, AttemptCount + 1)
   end
@@ -138,17 +140,17 @@ dirty(Key) ->
   ,ok
 .
 do_dirty(Key) ->
+  Ts = erlang:system_time(micro_seconds),
+  Record = {Key, dirty, Ts},
   case find(Key) of
     {Slice, dirty, _} ->
-      Ts = erlang:system_time(micro_seconds),
-      ets:insert(Slice, {Key, dirty, Ts})
+      ets:insert(Slice, Record)
     ;
     {Slice, _Value} ->
-      Ts = erlang:system_time(micro_seconds),
-      ets:insert(Slice, {Key, dirty, Ts})
+      ets:insert(Slice, Record)
     ;
     undefined ->
-      undefined
+      cache_insert_new(Record)
     %~
   end
 .
@@ -202,20 +204,29 @@ set(Key, Result) ->
 do_set(Key, Result, Timestamp) ->
   case find(Key) of
     {_Slice, dirty, DirtyTimestamp} ->
+      io:format("dirty~n"),
       if DirtyTimestamp > Timestamp ->
+        io:format("read again~n"),
         {error, read_again}
       ;
       true ->
+        io:format("dirty but result is newer than dirty timestamp~n"),
         {ok, do_set(Key, Result)}
       end
     ;
-    _ ->
+    O ->
+      io:format("other ~p~n",[O]),
       {ok, do_set(Key, Result)}
   end
 .
 do_set(Key, Result) ->
+   cache_insert_new({Key, Result})
+  ,Result
+.
+
+cache_insert_new(Object) ->
    Slice = current_slice()
-  ,ets:insert(Slice, {Key, Result})
+  ,ets:insert(Slice, Object)
   ,Size = ets:info(Slice, size)
   ,SliceCount = tuple_size(?CACHE_SLICES_TUPLE)
   ,Limit = cache_size() / SliceCount
@@ -231,7 +242,6 @@ do_set(Key, Result) ->
     end
     ,ets:delete_all_objects(current_slice())
   end
-  ,Result
 .
 %%------------------------------------------------------------------------------
 set_cache_size(CacheSize) when is_integer(CacheSize) ->
