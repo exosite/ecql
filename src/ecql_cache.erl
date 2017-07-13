@@ -92,13 +92,21 @@ do_get(Key, FunResult, 10) ->
 ;
 do_get(Key, FunResult, AttemptCount) ->
    incr_stat(empty)
-  ,Ts = erlang:system_time(micro_seconds)
+  ,Ts = system_time_in_micro_seconds()
   ,Result = FunResult()
   ,case is_cache_dirty_since(Key, Ts) of
     no -> cache_insert_new({Key, Result});
     yes -> do_get(Key, FunResult, AttemptCount + 1)
    end
 .
+
+%%------------------------------------------------------------------------------
+system_time_in_micro_seconds() ->
+   {A, B, C} = os:timestamp()
+  ,(A * 1000000 + B) * 1000000 + C
+.
+
+%%------------------------------------------------------------------------------
 is_cache_dirty_since(Key, Timestamp) ->
   case find(Key) of
     {_Slice, dirty, DirtyTimestamp} ->
@@ -116,6 +124,7 @@ is_cache_dirty_since(Key, Timestamp) ->
     %~
   end
 .
+
 %%------------------------------------------------------------------------------
 get_stat(Key) ->
   private_get(Key, 0)
@@ -156,7 +165,7 @@ dirty(Key) ->
   ,ok
 .
 do_dirty(Key) ->
-   Ts = erlang:system_time(micro_seconds)
+   Ts = system_time_in_micro_seconds()
   ,Record = {Key, dirty, Ts}
   ,case find(Key) of
     {Slice, _Value} ->
