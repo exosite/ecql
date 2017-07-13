@@ -87,7 +87,7 @@ do_get(Key, FunResult) ->
 do_get(Key, FunResult, 10) ->
    incr_stat(empty)
   ,Result = FunResult()
-  ,do_set(Key, Result)
+  ,cache_insert_new({Key, Result})
   ,dirty(Key)
 ;
 do_get(Key, FunResult, AttemptCount) ->
@@ -95,7 +95,7 @@ do_get(Key, FunResult, AttemptCount) ->
   ,Ts = erlang:system_time(micro_seconds)
   ,Result = FunResult()
   ,case is_cache_dirty_since(Key, Ts) of
-    no -> do_set(Key, Result);
+    no -> cache_insert_new({Key, Result});
     yes -> do_get(Key, FunResult, AttemptCount + 1)
    end
 .
@@ -213,13 +213,9 @@ set(Key, Result) ->
       ,Result
     ;
     undefined ->
-      do_set(Key, Result)
+      cache_insert_new({Key, Result})
     %~
   end
-.
-do_set(Key, Result) ->
-   cache_insert_new({Key, Result})
-  ,Result
 .
 cache_insert_new(Object) ->
    Slice = current_slice()
@@ -238,7 +234,8 @@ cache_insert_new(Object) ->
       %~
     end
     ,ets:delete_all_objects(current_slice())
-  end
+   end
+  ,Object
 .
 %%------------------------------------------------------------------------------
 set_cache_size(CacheSize) when is_integer(CacheSize) ->
