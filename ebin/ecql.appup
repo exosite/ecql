@@ -1,0 +1,31 @@
+%%==============================================================================
+%% Copyright (c) Exosite LLC
+%%
+%% ecql.appup - OTP-compliant Application Update Configuration File
+%%==============================================================================
+
+  {
+     "v1.1"
+    ,[
+      {
+         "v1.0"
+        ,[
+           {update ,ecql_cache ,{advanced ,[]}}
+          ,{load_module ,ecql_mnesia}
+        ]
+      }
+    ]
+    ,[
+      {
+         "v1.0"
+        ,[
+           {load_module ,ecql_mnesia}
+          ,{update ,ecql_cache ,{advanced ,[]}}
+        ]
+      }
+    ]
+  }
+.
+
+%%==============================================================================
+%% END OF FILE
