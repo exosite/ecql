@@ -42,6 +42,7 @@
 -define(DEFAULT_CACHESIZE, 1000000).
 -define(DEFAULT_CLUSTER_MODULE, erlang).
 -define(seconds(X), X*1000000).
+-define(CACHE_RETRY_LIMIT, 10).
 
 %%-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 %% Public API
@@ -73,34 +74,36 @@ get(Key, FunResult) ->
     {_Slice, Value} ->
       Value
     ;
-    {_Slice, dirty, _} ->
-      do_get(Key, FunResult)
+    {Slice, dirty, _} ->
+      do_get(Key, FunResult, {replace, Slice})
     ;
     undefined ->
-      do_get(Key, FunResult)
+      do_get(Key, FunResult, new)
     %~
   end
 .
-do_get(Key, FunResult) ->
-  do_get(Key, FunResult, 1)
+do_get(Key, FunResult, SetOption) ->
+  do_get(Key, FunResult, 0, SetOption)
 .
-do_get(Key, FunResult, 10) ->
+do_get(_Key, FunResult, ?CACHE_RETRY_LIMIT, _SetOption) ->
    incr_stat(empty)
-  ,Result = FunResult()
-  ,cache_insert_new({Key, Result})
-  ,dirty(Key)
-  ,Result
+  ,FunResult()
 ;
-do_get(Key, FunResult, AttemptCount) ->
+do_get(Key, FunResult, AttemptCount, SetOption) ->
    incr_stat(empty)
   ,Ts = system_time_in_micro_seconds()
   ,Result = FunResult()
   ,case is_cache_dirty_since(Key, Ts) of
     no ->
-       cache_insert_new({Key, Result})
+       case SetOption of
+        {replace, Slice} ->
+          ets:insert(Slice, {Key, Result})
+        ;
+        new -> cache_insert_new({Key, Result})
+       end
       ,Result
     ;
-    yes -> do_get(Key, FunResult, AttemptCount + 1)
+    yes -> do_get(Key, FunResult, AttemptCount + 1, SetOption)
    end
 .
 
@@ -221,7 +224,7 @@ set(Key, Result) ->
     {Slice, _Value} ->
       ets:insert(Slice, Record)
     ;
-    {Slice, dirty, _} ->
+    {Slice, dirty, _Ts} ->
       ets:insert(Slice, Record)
     ;
     undefined ->
