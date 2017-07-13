@@ -74,36 +74,35 @@ get(Key, FunResult) ->
     {_Slice, Value} ->
       Value
     ;
-    {Slice, dirty, _} ->
-      do_get(Key, FunResult, {replace, Slice})
+    {_Slice, dirty, _} ->
+      do_get(Key, FunResult)
     ;
     undefined ->
-      do_get(Key, FunResult, new)
+      do_get(Key, FunResult)
     %~
   end
 .
-do_get(Key, FunResult, SetOption) ->
-  do_get(Key, FunResult, 0, SetOption)
+do_get(Key, FunResult) ->
+  do_get(Key, FunResult, 0)
 .
-do_get(_Key, FunResult, ?CACHE_RETRY_LIMIT, _SetOption) ->
+do_get(_Key, FunResult, ?CACHE_RETRY_LIMIT) ->
    incr_stat(empty)
   ,FunResult()
 ;
-do_get(Key, FunResult, AttemptCount, SetOption) ->
+do_get(Key, FunResult, AttemptCount) ->
    incr_stat(empty)
   ,Ts = system_time_in_micro_seconds()
   ,Result = FunResult()
   ,case is_cache_dirty_since(Key, Ts) of
-    no ->
-       case SetOption of
-        {replace, Slice} ->
-          ets:insert(Slice, {Key, Result})
-        ;
-        new -> cache_insert_new({Key, Result})
-       end
+    {no, Slice} ->
+       ets:insert(Slice, {Key, Result})
       ,Result
     ;
-    yes -> do_get(Key, FunResult, AttemptCount + 1, SetOption)
+    no ->
+       cache_insert_new({Key, Result})
+      ,Result
+    ;
+    yes -> do_get(Key, FunResult, AttemptCount + 1)
    end
 .
 
@@ -116,17 +115,20 @@ system_time_in_micro_seconds() ->
 %%------------------------------------------------------------------------------
 is_cache_dirty_since(Key, Timestamp) ->
   case find(Key) of
-    {_Slice, dirty, DirtyTimestamp} ->
+    {Slice, dirty, DirtyTimestamp} ->
       if DirtyTimestamp > Timestamp ->
         % dirty mark is newer than direct read result - read again
         yes
       ;
       true ->
         % dirty but result is newer than dirty timestamp - overwrite dirty mark
-        no
+        {no, Slice}
       end
     ;
-    _ ->
+    {Slice, _Value} ->
+      {no, Slice}
+    ;
+    undefined ->
       no
     %~
   end
