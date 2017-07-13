@@ -89,13 +89,17 @@ do_get(Key, FunResult, 10) ->
   ,Result = FunResult()
   ,cache_insert_new({Key, Result})
   ,dirty(Key)
+  ,Result
 ;
 do_get(Key, FunResult, AttemptCount) ->
    incr_stat(empty)
   ,Ts = system_time_in_micro_seconds()
   ,Result = FunResult()
   ,case is_cache_dirty_since(Key, Ts) of
-    no -> cache_insert_new({Key, Result});
+    no ->
+       cache_insert_new({Key, Result})
+      ,Result
+    ;
     yes -> do_get(Key, FunResult, AttemptCount + 1)
    end
 .
@@ -212,20 +216,22 @@ match_clear(Pattern) ->
 
 %%------------------------------------------------------------------------------
 set(Key, Result) ->
-  case find(Key) of
-    {Slice, dirty, _} ->
-       ets:insert(Slice, {Key, Result})
-      ,Result
-    ;    
+   Record = {Key, Result}
+  ,case find(Key) of
     {Slice, _Value} ->
-       ets:insert(Slice, {Key, Result})
-      ,Result
+      ets:insert(Slice, Record)
+    ;
+    {Slice, dirty, _} ->
+      ets:insert(Slice, Record)
     ;
     undefined ->
-      cache_insert_new({Key, Result})
+      cache_insert_new(Record)
     %~
-  end
+   end
+  ,Result
 .
+
+%%------------------------------------------------------------------------------
 cache_insert_new(Object) ->
    Slice = current_slice()
   ,ets:insert(Slice, Object)
@@ -244,8 +250,9 @@ cache_insert_new(Object) ->
     end
     ,ets:delete_all_objects(current_slice())
    end
-  ,Object
+  ,ok
 .
+
 %%------------------------------------------------------------------------------
 set_cache_size(CacheSize) when is_integer(CacheSize) ->
   private_set(cache_size, CacheSize)
