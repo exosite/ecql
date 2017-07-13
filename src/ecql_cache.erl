@@ -85,21 +85,37 @@ do_get(Key, FunResult) ->
   do_get(Key, FunResult, 1)
 .
 do_get(Key, FunResult, 10) ->
-  incr_stat(empty),
-  Result = FunResult(),
-  do_set(Key, Result),
-  dirty(Key)
+   incr_stat(empty)
+  ,Result = FunResult()
+  ,do_set(Key, Result)
+  ,dirty(Key)
 ;
 do_get(Key, FunResult, AttemptCount) ->
-  incr_stat(empty),
-  Ts = erlang:system_time(micro_seconds),
-  Result = FunResult(),
-  case do_set(Key, Result, Ts) of
-    {ok, Value} -> Value;
-    {error, read_again} -> do_get(Key, FunResult, AttemptCount + 1)
+   incr_stat(empty)
+  ,Ts = erlang:system_time(micro_seconds)
+  ,Result = FunResult()
+  ,case is_cache_dirty_since(Key, Ts) of
+    no -> do_set(Key, Result);
+    yes -> do_get(Key, FunResult, AttemptCount + 1)
+   end
+.
+is_cache_dirty_since(Key, Timestamp) ->
+  case find(Key) of
+    {_Slice, dirty, DirtyTimestamp} ->
+      if DirtyTimestamp > Timestamp ->
+        % dirty mark is newer than direct read result - read again
+        yes
+      ;
+      true ->
+        % dirty but result is newer than dirty timestamp - overwrite dirty mark
+        no
+      end
+    ;
+    _ ->
+      no
+    %~
   end
 .
-
 %%------------------------------------------------------------------------------
 get_stat(Key) ->
   private_get(Key, 0)
@@ -140,19 +156,19 @@ dirty(Key) ->
   ,ok
 .
 do_dirty(Key) ->
-  Ts = erlang:system_time(micro_seconds),
-  Record = {Key, dirty, Ts},
-  case find(Key) of
-    {Slice, dirty, _} ->
+   Ts = erlang:system_time(micro_seconds)
+  ,Record = {Key, dirty, Ts}
+  ,case find(Key) of
+    {Slice, _Value} ->
       ets:insert(Slice, Record)
     ;
-    {Slice, _Value} ->
+    {Slice, dirty, _} ->
       ets:insert(Slice, Record)
     ;
     undefined ->
       cache_insert_new(Record)
     %~
-  end
+   end
 .
 
 %%------------------------------------------------------------------------------
@@ -201,28 +217,10 @@ set(Key, Result) ->
     %~
   end
 .
-do_set(Key, Result, Timestamp) ->
-  case find(Key) of
-    {_Slice, dirty, DirtyTimestamp} ->
-      if DirtyTimestamp > Timestamp ->
-        io:format("dirty mark is newer than direct read result~n - read again~n"),
-        {error, read_again}
-      ;
-      true ->
-        io:format("dirty but result is newer than dirty timestamp~n - overwrite dirty mark~n"),
-        {ok, do_set(Key, Result)}
-      end
-    ;
-    O ->
-      io:format("other ~p~n",[O]),
-      {ok, do_set(Key, Result)}
-  end
-.
 do_set(Key, Result) ->
    cache_insert_new({Key, Result})
   ,Result
 .
-
 cache_insert_new(Object) ->
    Slice = current_slice()
   ,ets:insert(Slice, Object)
