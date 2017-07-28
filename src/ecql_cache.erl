@@ -87,6 +87,10 @@ do_get(Key, FunResult) ->
 .
 do_get(_Key, FunResult, ?CACHE_RETRY_LIMIT) ->
    incr_stat(empty)
+  ,error_logger:error_msg(
+      "~p: reach retry limit of ~p.~n"
+     ,[?MODULE, ?CACHE_RETRY_LIMIT]
+   )
   ,FunResult()
 ;
 do_get(Key, FunResult, AttemptCount) ->
