@@ -42,6 +42,7 @@
 -define(DEFAULT_CACHESIZE, 1000000).
 -define(DEFAULT_CLUSTER_MODULE, erlang).
 -define(seconds(X), X*1000000).
+-define(CACHE_RETRY_LIMIT, 10).
 
 %%-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 %% Public API
@@ -73,9 +74,66 @@ get(Key, FunResult) ->
     {_Slice, Value} ->
       Value
     ;
+    {_Slice, dirty, _} ->
+      do_get(Key, FunResult)
+    ;
     undefined ->
-       incr_stat(empty)
-      ,do_set(Key, FunResult())
+      do_get(Key, FunResult)
+    %~
+  end
+.
+do_get(Key, FunResult) ->
+  do_get(Key, FunResult, 0)
+.
+do_get(_Key, FunResult, ?CACHE_RETRY_LIMIT) ->
+   incr_stat(empty)
+  ,error_logger:error_msg(
+      "~p: reach retry limit of ~p.~n"
+     ,[?MODULE, ?CACHE_RETRY_LIMIT]
+   )
+  ,FunResult()
+;
+do_get(Key, FunResult, AttemptCount) ->
+   incr_stat(empty)
+  ,Ts = system_time_in_micro_seconds()
+  ,Result = FunResult()
+  ,case is_cache_dirty_since(Key, Ts) of
+    {no, Slice} ->
+       ets:insert(Slice, {Key, Result})
+      ,Result
+    ;
+    no ->
+       cache_insert_new({Key, Result})
+      ,Result
+    ;
+    yes -> do_get(Key, FunResult, AttemptCount + 1)
+   end
+.
+
+%%------------------------------------------------------------------------------
+system_time_in_micro_seconds() ->
+   {A, B, C} = os:timestamp()
+  ,(A * 1000000 + B) * 1000000 + C
+.
+
+%%------------------------------------------------------------------------------
+is_cache_dirty_since(Key, Timestamp) ->
+  case find(Key) of
+    {Slice, dirty, DirtyTimestamp} ->
+      if DirtyTimestamp > Timestamp ->
+        % dirty mark is newer than direct read result - read again
+        yes
+      ;
+      true ->
+        % dirty but result is newer than dirty timestamp - overwrite dirty mark
+        {no, Slice}
+      end
+    ;
+    {Slice, _Value} ->
+      {no, Slice}
+    ;
+    undefined ->
+      no
     %~
   end
 .
@@ -120,14 +178,19 @@ dirty(Key) ->
   ,ok
 .
 do_dirty(Key) ->
-  case find(Key) of
+   Ts = system_time_in_micro_seconds()
+  ,Record = {Key, dirty, Ts}
+  ,case find(Key) of
     {Slice, _Value} ->
-      ets:delete(Slice, Key)
+      ets:insert(Slice, Record)
+    ;
+    {Slice, dirty, _} ->
+      ets:insert(Slice, Record)
     ;
     undefined ->
-      undefined
+      cache_insert_new(Record)
     %~
-  end
+   end
 .
 
 %%------------------------------------------------------------------------------
@@ -162,19 +225,25 @@ match_clear(Pattern) ->
 
 %%------------------------------------------------------------------------------
 set(Key, Result) ->
-  case find(Key) of
+   Record = {Key, Result}
+  ,case find(Key) of
     {Slice, _Value} ->
-       ets:insert(Slice, {Key, Result})
-      ,Result
+      ets:insert(Slice, Record)
+    ;
+    {Slice, dirty, _Ts} ->
+      ets:insert(Slice, Record)
     ;
     undefined ->
-      do_set(Key, Result)
+      cache_insert_new(Record)
     %~
-  end
+   end
+  ,Result
 .
-do_set(Key, Result) ->
+
+%%------------------------------------------------------------------------------
+cache_insert_new(Object) ->
    Slice = current_slice()
-  ,ets:insert(Slice, {Key, Result})
+  ,ets:insert(Slice, Object)
   ,Size = ets:info(Slice, size)
   ,SliceCount = tuple_size(?CACHE_SLICES_TUPLE)
   ,Limit = cache_size() / SliceCount
@@ -189,8 +258,8 @@ do_set(Key, Result) ->
       %~
     end
     ,ets:delete_all_objects(current_slice())
-  end
-  ,Result
+   end
+  ,ok
 .
 
 %%------------------------------------------------------------------------------
@@ -302,6 +371,9 @@ find(Key, [Slice | Rest]) ->
   case ets:lookup(Slice, Key) of
     [{Key, Value}] ->
       {Slice, Value}
+    ;
+    [{Key, dirty, Timestamp}] ->
+      {Slice, dirty, Timestamp}
     ;
     [] -> % [] or [Index, OtherKey, Value, Time]
       find(Key, Rest)
