@@ -95,47 +95,53 @@ do_get(_Key, FunResult, ?CACHE_RETRY_LIMIT) ->
 ;
 do_get(Key, FunResult, AttemptCount) ->
    incr_stat(empty)
-  ,Ts = system_time_in_micro_seconds()
+  ,Ts = erlang:monotonic_time()
   ,Result = FunResult()
-  ,case is_cache_dirty_since(Key, Ts) of
-    {no, Slice} ->
-       ets:insert(Slice, {Key, Result})
-      ,Result
+  ,case try_replace(Key, Ts, Result) of
+    done ->
+      Result
     ;
-    no ->
+    notfound ->
        cache_insert_new({Key, Result})
       ,Result
     ;
-    yes -> do_get(Key, FunResult, AttemptCount + 1)
+    new_dirty ->
+      do_get(Key, FunResult, AttemptCount + 1)
+    %~
    end
 .
-
 %%------------------------------------------------------------------------------
-system_time_in_micro_seconds() ->
-   {A, B, C} = os:timestamp()
-  ,(A * 1000000 + B) * 1000000 + C
+%% returns new_dirty, done, notfound
+try_replace(Key, Timestamp, NewValue) ->
+  do_try_replace(Key, Timestamp, NewValue, ?CACHE_SLICES_LIST)
 .
-
-%%------------------------------------------------------------------------------
-is_cache_dirty_since(Key, Timestamp) ->
-  case find(Key) of
-    {Slice, dirty, DirtyTimestamp} ->
-      if DirtyTimestamp > Timestamp ->
-        % dirty mark is newer than direct read result - read again
-        yes
-      ;
-      true ->
-        % dirty but result is newer than dirty timestamp - overwrite dirty mark
-        {no, Slice}
+do_try_replace(_Key, _Timestamp, _NewValue, []) ->
+  not_found
+;
+do_try_replace(Key, ValueTs, NewValue, [Slice | RestSlices]) ->
+   MS = ets:fun2ms(
+    fun
+      ({K, dirty, DirtyTs}) when DirtyTs < ValueTs ->
+        {K, NewValue};
+      ({K, _Value}) ->
+        {K, NewValue}
+    end
+   )
+  ,case ets:select_replace(Slice, MS) of
+    0 ->
+      case ets:lookup(Slice, Key) of
+        [{Key, dirty, DirtyTs}] when DirtyTs >= ValueTs ->
+          new_dirty
+        ;
+        _ ->
+          do_try_replace(Key, ValueTs, NewValue, RestSlices)
+        %~
       end
     ;
-    {Slice, _Value} ->
-      {no, Slice}
-    ;
-    undefined ->
-      no
+    _Int when _Int > 0 ->
+      done
     %~
-  end
+   end
 .
 
 %%------------------------------------------------------------------------------
@@ -178,7 +184,7 @@ dirty(Key) ->
   ,ok
 .
 do_dirty(Key) ->
-   Ts = system_time_in_micro_seconds()
+   Ts = erlang:monotonic_time()
   ,Record = {Key, dirty, Ts}
   ,case find(Key) of
     {Slice, _Value} ->
