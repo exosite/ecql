@@ -5,22 +5,20 @@
 %%==============================================================================
 
   {
-     "v1.1"
+     "v1.2"
     ,[
       {
-         "v1.0"
+         "v1.1"
         ,[
-           {update ,ecql_cache ,{advanced ,[]}}
-          ,{load_module ,ecql_mnesia}
+           {load_module ,ecql_cache}
         ]
       }
     ]
     ,[
       {
-         "v1.0"
+         "v1.1"
         ,[
-           {load_module ,ecql_mnesia}
-          ,{update ,ecql_cache ,{advanced ,[]}}
+           {load_module ,ecql_cache}
         ]
       }
     ]
