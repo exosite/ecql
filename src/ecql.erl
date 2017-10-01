@@ -179,7 +179,10 @@ repair_connection_pool(OldPoolTuple, Configuration) ->
           ;
           % Case a) add new connection
           false ->
-            [add_connection(Host, Configuration) | NewPool]
+            spawn_monitor(fun() ->
+              exit(add_connection(Host, Configuration))
+            end)
+            ,NewPool
           %~
         end
       ;
@@ -200,18 +203,18 @@ is_alive(Pid) ->
 
 %%------------------------------------------------------------------------------
 add_connection(Host, Configuration) ->
-  case ecql_connection:start_link(Host, Configuration) of
+  case ecql_connection:start(Host, Configuration) of
     {ok, Connection} ->
        Keyspace = proplists:get_value(keyspace, Configuration, "ecql")
       ,lists:foreach(
          fun(Pid) -> init_query({Host, Pid}, ["USE ", Keyspace]) end
         ,ecql_connection:get_streams(Connection)
       )
-      ,{Host, Connection}
+      ,{connection_ok, {Host, Connection}}
     ;
     Error ->
        error_logger:error_msg("ecql: Failed connecting to: ~p: ~p~n", [Host, Error])
-      ,Error
+      ,connection_failed
     %~
   end
 .
@@ -266,10 +269,25 @@ handle_info({'EXIT', Pid, Reason}, State = #state{dirty = Dirty, clients = Conne
   ,Connections = [Conn || Conn = {_, ConnPid} <- tuple_to_list(Connections0), ConnPid =/= Pid]
   ,{noreply, State#state{dirty = true, clients = list_to_tuple(Connections)}}
 ;
-handle_info(repair, State = #state{settings = Configuration, clients = Connections0, waiting = Waiting}) ->
+handle_info(repair, State = #state{settings = Configuration, clients = Connections0}) ->
    Connections = repair_connection_pool(Connections0, Configuration)
+  ,{noreply, State#state{dirty = false, clients = Connections}}
+;
+handle_info(
+  {'DOWN', _Ref, process, _Pid, {connection_ok, Conn = {_, Pid}}},
+  State = #state{clients = Connections0, waiting = Waiting}
+) ->
+   link(Pid)
+  ,Connections = erlang:insert_element(1, Connections0, Conn)
   ,Waiting1 = reply(Waiting, Connections, 1)
-  ,{noreply, State#state{dirty = false, clients = Connections, waiting = Waiting1}}
+  ,{noreply, State#state{clients = Connections, waiting = Waiting1}}
+;
+handle_info(
+  {'DOWN', _Ref, process, _Pid, connection_failed},
+  State = #state{dirty = Dirty}
+) ->
+   Dirty orelse erlang:send_after(?RECONNECT_INTERVALL, self(), repair)
+  ,{noreply, State#state{dirty = true}}
 ;
 handle_info(timeout, State) ->
    % Who timed out?
