@@ -5,8 +5,10 @@
 %%==============================================================================
 -module(ecql_stream).
 -behaviour(gen_server).
--compile(native).
--compile({hipe, [o3]}).
+-compile(inline).
+-compile({inline_size,   500}).    %% default=24
+-compile({inline_effort, 500}).   %% default=150
+-compile({inline_unroll, 5}).
 
 %% Public API
 -export([
@@ -207,7 +209,7 @@ handle_call(query_receive, _From, State = #state{lastresult = Ret}) ->
 handle_call({query_async, Statement, Args, Consistency}, _From, State0) ->
    State1 = #state{async_pending = Pending} = wait_async(State0, ?MAX_PENDING)
   ,execute_query(Statement, Args, Consistency, State1, ?DISABLED_PAGING)
-  ,{reply, ok, State1#state{async_pending = Pending + 1, async_laststmt = Statement, async_start = now()}}
+  ,{reply, ok, State1#state{async_pending = Pending + 1, async_laststmt = Statement, async_start = erlang:timestamp()}}
 ;
 handle_call({prepare, Cql}, _From, State0) ->
    State1 = wait_async(State0)
@@ -226,7 +228,7 @@ handle_call({query_batch, Statement, ListOfArgs, Consistency}, _From, State) ->
 handle_call({query_batch_async, Cql, ListOfArgs, Consistency}, _From, State) ->
    State1 = #state{async_pending = Pending} = wait_async(State, ?MAX_PENDING_BATCH)
   ,execute_batch(Cql, ListOfArgs, Consistency, State1)
-  ,{reply, ok, State1#state{async_pending = Pending + 1, async_laststmt = Cql, async_start = now()}}
+  ,{reply, ok, State1#state{async_pending = Pending + 1, async_laststmt = Cql, async_start = erlang:timestamp()}}
 ;
 handle_call(release, _From, State = #state{monitor_ref = undefined}) ->
    {reply, {error, already_released}, State}
@@ -300,7 +302,7 @@ wait_async(State = #state{async_pending = Pending}, _Allowed) ->
 
 %%------------------------------------------------------------------------------
 log(ResponseOpCode, Body, State = #state{async_laststmt = Cql, async_start = Begin}) ->
-   ecql_log:log(timer:now_diff(now(), Begin), async, Cql, [])
+   ecql_log:log(timer:now_diff(erlang:timestamp(), Begin), async, Cql, [])
   ,case ResponseOpCode of
     ?OP_ERROR ->
       do_log(handle_response(?OP_ERROR, Body), State)

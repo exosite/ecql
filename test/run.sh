@@ -12,4 +12,4 @@ for file in ecql_*; do
   mod=${file%.*}
   str="$str,cass_test:test($mod,50000)"
 done
-erl -noshell -eval "$str,init:stop()."
+erl -pa $ERL_LIBS -noshell -eval "$str,init:stop()."
