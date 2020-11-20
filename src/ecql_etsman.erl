@@ -44,6 +44,7 @@ ensure_ets_tables() ->
     ,?CACHE_SLICES_LIST
   )
   ,ensure_ets_table(ecql_statements, [{keypos, 2}])
+  ,ensure_ets_table(ecql_erlcass_statements, [{keypos, 1}])
 .
 ensure_ets_table(Name, Options) ->
   Self = self()

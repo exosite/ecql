@@ -11,9 +11,17 @@ a transition from mnesia to cassandra easier.
 Usage
 -----
 
-ecql is a simple API.
+Module Configuration
+------------------
 
+The `module` configuration parameter supports four difference values:
 
+* `ecql_erlcass` - all reads+writes handled by the erlcass Cassandra >=2.1 driver.
+* `ecql_native` - all reads+writes handled by the ecql internal Cassandra <=2.0 driver.
+* `undefined` - same as `ecql_native`
+* `{_RWModule, _WriteModule}` - The first module is used for all reads+writes, the second module receives a copy of each write action
+    * `{ecql_native, ecql_erlcass}`
+    * `{ecql_erlcass, ecql_native}` -
 
 `ecql:execute/1,2,3`
 ------------------

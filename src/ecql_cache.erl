@@ -20,6 +20,8 @@
   ,set_cluster_module/1
   ,stats/0
   ,clear_stats/0
+  ,private_get/2
+  ,private_set/2
 ]).
 
 %% OTP gen_server

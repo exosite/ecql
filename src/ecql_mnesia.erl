@@ -320,14 +320,7 @@ do_wait_for_tables(Tables, Number) ->
 
 %%------------------------------------------------------------------------------
 system_info(tables) ->
-   {_, Tables} = ecql:select([
-     "SELECT columnfamily_name, comment FROM  system.schema_columnfamilies"
-   ])
-  ,[
-    unmap_recordname(TableName)
-    || [TableName, Comment] <- Tables
-      ,string:left(Comment, 11) =:= "ecql_mnesia"
-   ]
+  [TableName || {TableName, _} <- get_tables()]
 ;
 system_info(use_dir) ->
   false
@@ -994,9 +987,12 @@ split(_NObjects ,ResultList) ->
 %%------------------------------------------------------------------------------
 get_tables() ->
   ecql_cache:get({ecql_mnesia, tables}, fun() ->
-     {_, CQLTables} = ecql:select([
-       "SELECT columnfamily_name, comment FROM system.schema_columnfamilies"
-     ])
+    Query = case ecql:config(module) of
+       {ecql_erlcass, _} -> "SELECT table_name, comment FROM system_schema.tables";
+       ecql_erlcass -> "SELECT table_name, comment FROM system_schema.tables";
+       _ -> "SELECT columnfamily_name, comment FROM system.schema_columnfamilies"
+    end
+    ,{_, CQLTables} = ecql:select([Query])
     ,Tables = [
       {
          unmap_recordname(TableName)

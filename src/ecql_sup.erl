@@ -43,12 +43,12 @@ init(_) ->
           ,[ecql_cache]
         }
        ,{
-           ecql
-          ,{ecql, start_link, []}
+           ecql_native
+          ,{ecql_native, start_link, []}
           ,permanent
           ,600
           ,worker
-          ,[ecql]
+          ,[ecql_native]
         }
        ,{
            ecql_log
