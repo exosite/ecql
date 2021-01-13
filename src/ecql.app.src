@@ -17,6 +17,7 @@
       ,{mod, {ecql ,[]}}
       ,{applications ,[
          kernel
+        ,erlcass
         ,sasl
         ,stdlib
       ]}
