@@ -7,7 +7,7 @@
   {
     application ,ecql ,[
        {description ,"ecql"}
-      ,{vsn ,"v1.2.1"}
+      ,{vsn ,"v1.3"}
       ,{registered ,[
          ecql
         ,ecql_cache
