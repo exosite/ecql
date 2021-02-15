@@ -178,18 +178,7 @@ do_set(Key, Result) ->
   ,Size = ets:info(Slice, size)
   ,SliceCount = tuple_size(?CACHE_SLICES_TUPLE)
   ,Limit = cache_size() / SliceCount
-  ,(Size > Limit) andalso begin
-     Index = private_get(current_slice, 1) + 1
-    ,case (Index > SliceCount) of
-      true ->
-        private_set(current_slice, 1)
-      ;
-      false ->
-        private_set(current_slice, Index)
-      %~
-    end
-    ,ets:delete_all_objects(current_slice())
-  end
+  ,(Size > Limit) andalso gen_server:cast(?MODULE, update_slice)
   ,Result
 .
 
@@ -254,6 +243,21 @@ handle_cast({match_clear, Pattern}, State) ->
 ;
 handle_cast(terminate ,State) ->
   {stop ,terminated ,State}
+;
+handle_cast(update_slice, State) ->
+   Slice = current_slice()
+  ,Size = ets:info(Slice, size)
+  ,SliceCount = tuple_size(?CACHE_SLICES_TUPLE)
+  ,Limit = cache_size() / SliceCount
+  ,(Size > Limit) andalso begin
+     Index = private_get(current_slice, 1) + 1
+    ,case (Index > SliceCount) of
+      true -> private_set(current_slice, 1);
+      false -> private_set(current_slice, Index)
+    end
+    ,ets:delete_all_objects(current_slice())
+  end
+  ,{noreply, State}
 ;
 handle_cast(_, State) ->
   {noreply, State}
