@@ -269,9 +269,9 @@ handle_info({nodeup, _}, State) ->
    {noreply, State}
 ;
 handle_info({nodedown, _}, State) ->
-   % Nodedown means we likely lost messages
-   clear()
-  ,{noreply, State}
+   % Nodedown means we might have lost a message
+   %  clear() - disabled ONEPLAT-1218
+   {noreply, State}
 ;
 handle_info(timeout, State) ->
    % Who timed out?
