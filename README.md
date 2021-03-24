@@ -19,9 +19,12 @@ The `module` configuration parameter supports four difference values:
 * `ecql_erlcass` - all reads+writes handled by the erlcass Cassandra >=2.1 driver.
 * `ecql_native` - all reads+writes handled by the ecql internal Cassandra <=2.0 driver.
 * `undefined` - same as `ecql_native`
-* `{_RWModule, _WriteModule}` - The first module is used for all reads+writes, the second module receives a copy of each write action
+* `{_Primary, _Secondary}` - The first module is used for all reads+writes, the second module receives a copy of ONLY write actions
     * `{ecql_native, ecql_erlcass}`
     * `{ecql_erlcass, ecql_native}` -
+* `{_Primary, {rw, _Secondary}}` - The first module is used for all reads+writes, the second module receives a copy of each write AND each read action
+    * `{ecql_native, {rw, ecql_erlcass}}`
+    * `{ecql_erlcass, {rw, ecql_native}}` -
 
 `ecql:execute/1,2,3`
 ------------------

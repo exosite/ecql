@@ -26,41 +26,30 @@ init(_) ->
     ,{
        {one_for_one, MaxRestart, MaxTime}
       ,[
-        {
-           ecql_etsman
-          ,{ecql_etsman, start_link, []}
-          ,permanent
-          ,600
-          ,worker
-          ,[ecql_etsman]
-        }
-       ,{
-           ecql_cache
-          ,{ecql_cache, start_link, []}
-          ,permanent
-          ,600
-          ,worker
-          ,[ecql_cache]
-        }
-       ,{
-           ecql_native
-          ,{ecql_native, start_link, []}
-          ,permanent
-          ,600
-          ,worker
-          ,[ecql_native]
-        }
-       ,{
-           ecql_log
-          ,{ecql_log, start_link, []}
-          ,permanent
-          ,600
-          ,worker
-          ,[ecql_log]
-        }
+        worker(ecql_etsman)
+       ,worker(ecql_cache)
+       ,worker(ecql_native)
+       ,worker(ecql_log)
+       ,worker(ecql_replicator)
       ]
      }
    }
+.
+
+%%-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+%% Private API
+%%-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+
+%%------------------------------------------------------------------------------
+worker(Module) ->
+  {
+     Module
+    ,{Module, start_link, []}
+    ,permanent
+    ,600
+    ,worker
+    ,[Module]
+  }
 .
 
 %%==============================================================================

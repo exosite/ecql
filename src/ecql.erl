@@ -362,7 +362,7 @@ indexof(Element, [_ | Tail]) ->
 with_stream_do(Function, Args) ->
   case config(module) of
     {RwModule, WModule} ->
-       forward_writes(Function, Args, WModule)
+       ecql_replicator:forward(Function, Args, WModule)
       ,RwModule:with_stream_do(Function, Args)
     ;
     undefined ->
@@ -372,35 +372,6 @@ with_stream_do(Function, Args) ->
       Module:with_stream_do(Function, Args)
     %~
   end
-.
-
-%%------------------------------------------------------------------------------
-forward_writes(query, Args, WModule) ->
-  forward_writes(Args, WModule)
-;
-forward_writes(query_async, Args, WModule) ->
-  forward_writes(Args, WModule)
-;
-forward_writes(query_batch, Args, WModule) ->
-  WModule:with_stream_do(query_batch, Args)
-;
-forward_writes(_Other, _Args, _WModule) ->
-  ok
-.
-
-%%------------------------------------------------------------------------------
-forward_writes([Cql, Args, Consistency], WModule) ->
-   Command = binary:bin_to_list(iolist_to_binary(Cql), {0, 4})
-  ,Forward = case string:uppercase(Command) of
-    "DROP" -> true;
-    "CREA" -> true;
-    "TRUN" -> true;
-    "UPDA" -> true;
-    "INSE" -> true;
-    "DELE" -> true;
-    _AllElse -> false
-  end
-  ,Forward andalso WModule:with_stream_do(query_async, [Cql, Args, Consistency])
 .
 
 %%==============================================================================
