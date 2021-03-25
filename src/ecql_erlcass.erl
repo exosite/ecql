@@ -62,7 +62,7 @@ with_stream_do(query_batch, [Cql, ListOfArgs, Consistency]) ->
         ,ok = erlcass:bind_prepared_params_by_index(Stmt, Args1)
         ,Stmt
     end, ListOfArgs)
-    ,erlcass:batch_execute(?CASS_BATCH_TYPE_LOGGED, Stmts, [{consistency_level, Consistency}])
+    ,erlcass:batch_execute(?CASS_BATCH_TYPE_UNLOGGED, Stmts, [{consistency_level, Consistency}])
 ;
 with_stream_do(foldl, [Fun, Acc, Cql, Args, Consistency]) ->
     Ret = with_stream_do(query_page, [Cql, Args, Consistency])
