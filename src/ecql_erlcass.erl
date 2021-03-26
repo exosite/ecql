@@ -221,17 +221,10 @@ execute_paged(Stm, Identifier) ->
 .
 
 %%------------------------------------------------------------------------------
-% same as in erclass.erl but without timeout
+% same as in erlcass.erl but without timeout
 receive_paged_response(Tag) ->
     receive
-        {paged_execute_statement_result, Tag, {ok, Columns, Rows}} ->
-            {ok, Columns, Rows, false};
-        {paged_execute_statement_result_has_more, Tag, {ok, Columns, Rows}} ->
-            {ok, Columns, Rows, true};
-        {paged_execute_statement_result, Tag, Error} ->
-            Error;
-        {paged_execute_statement_result_has_more, Tag, Error} ->
-            Error
+        {execute_statement_result, Tag, Result} -> Result
     end
 .
 
