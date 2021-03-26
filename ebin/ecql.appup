@@ -5,44 +5,30 @@
 %%==============================================================================
 
   {
-     "v1.3"
+     "v1.4"
     ,[
       {
-         "v1.2.1"
+         "v1.3"
         ,[
-          % Adding two new methods
-           {load_module ,ecql_cache}
-          % Updating erlang:timestamp() to os:timestamp()
-          ,{load_module ,ecql_stream}
-          % Create a new ets table in code_change()
-          ,{update ,ecql_etsman ,{advanced ,nil}}
-
-          ,{add_module ,ecql_native}
-          ,{add_module ,ecql_erlcass}
-          ,{apply ,{application ,ensure_all_started ,[erlcass]}}
+           {add_module ,ecql_replicator}
           ,{update ,ecql_sup ,supervisor}
-          ,{apply ,{op_install ,update_config ,["2021-03-15" ,ecql]}}
-          ,{apply ,{op_install ,update_config ,["2021-03-15" ,erlcass]}}
-          ,{apply ,{supervisor ,restart_child ,[ecql_sup ,ecql_native]}}
-
-          % Refers to ecql_native.erl assumes running
+          ,{apply ,{supervisor ,restart_child ,[ecql_sup ,ecql_replicator]}}
+          % Casts to ecql_replicator gen_server
           ,{load_module ,ecql}
-          % Refers to ecql.erl
-          ,{load_module ,ecql_mnesia}
-
-          % This does not seem reversable
-          % 1. load ecql 2. start_child because loading ecql.erl would crash
-          % running code ,but loading it would prevent starting a gen_server
-          ,{apply ,{supervisor ,terminate_child ,[ecql_sup ,ecql]}}
-          ,{apply ,{supervisor ,delete_child ,[ecql_sup ,ecql]}}
+          % Updated to unlogged batch
+          ,{load_module ,ecql_erlcass}
         ]
       }
     ]
     ,[
       {
-         "v1.2.1"
+         "v1.3"
         ,[
-          restart_emulator
+           {load_module ,ecql}
+          ,{load_module ,ecql_erlcass}
+          ,{update ,ecql_sup ,supervisor}
+          ,{apply ,{supervisor ,delete_child ,[ecql_sup ,ecql_replicator]}}
+          ,{delete_module ,ecql_replicator}
         ]
       }
     ]
