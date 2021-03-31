@@ -34,6 +34,13 @@ with_stream_do(query_page, [Cql, Args, Consistency]) ->
 ;
 with_stream_do(query_page, [{Statement, Atom}]) ->
     case execute_paged(Statement, Atom) of
+        {ok, Heads, Rows} ->
+            Names = lists:map(fun({Name, _Type}) ->
+                 binary_to_atom(Name, utf8)
+            end, Heads)
+            ,Values = text_to_list(Heads, Rows)
+            ,{{Names, Values}, '$end_of_table'}
+        ;
         {ok, Heads, Rows, HasMore} ->
             Names = lists:map(fun({Name, _Type}) ->
                  binary_to_atom(Name, utf8)
