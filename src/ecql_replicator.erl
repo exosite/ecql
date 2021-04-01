@@ -9,6 +9,7 @@
 %% Public API
 -export([
    forward/3
+  ,pending_queries/0
 ]).
 
 %% OTP gen_server
@@ -28,7 +29,7 @@
 
 %% Records
 -record(state, {
-   result_log, info_log
+   shadows, info_log, result_log, pending_queries
 }).
 
 %%-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
@@ -37,7 +38,7 @@
 
 %%------------------------------------------------------------------------------
 forward(Function, Args, Module) ->
-  gen_server:cast(?MODULE, {forward, {Function, Args, Module}})
+  gen_server:cast(?MODULE, {forward, self(), {Function, Args, Module}})
 .
 
 %%-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
@@ -52,7 +53,12 @@ start_link() ->
 
 %%------------------------------------------------------------------------------
 init(_) ->
-  {ok, #state{result_log = [], info_log = []}}
+  {ok, #state{
+     shadows = #{}
+    ,info_log = []
+    ,result_log = []
+    ,pending_queries = #{}
+  }}
 .
 
 %%------------------------------------------------------------------------------
@@ -61,19 +67,59 @@ stop() ->
 .
 
 %%------------------------------------------------------------------------------
+pending_queries() ->
+  gen_server:call(?MODULE, pending_queries)
+.
+
+%%------------------------------------------------------------------------------
+handle_info({'DOWN', _Ref, process, Pid, _Info}, State) ->
+   maps:get(Pid, State#state.shadows) ! done
+  ,{noreply, State#state{
+     shadows = maps:remove(Pid, State#state.shadows)
+  }}
+;
+
+%%------------------------------------------------------------------------------
 handle_info(Message, State = #state{info_log = Log}) ->
   {noreply, State#state{info_log = do_log(Log, Message)}}
 .
 
+
 %%------------------------------------------------------------------------------
 handle_call(stop, _From, State) ->
   {stop, normal, ok, State}
+;
+
+%%------------------------------------------------------------------------------
+handle_call(pending_queries, _From, State) ->
+  {reply, maps:size(State#state.pending_queries), State}
 .
 
 %%------------------------------------------------------------------------------
-handle_cast({forward, {Fun, Args, Module}}, State = #state{result_log = Log}) ->
-   Result = do_forward(Fun, Args, Module)
-  ,{noreply, State#state{result_log = do_log(Log, Result)}}
+handle_cast({forward, From, Args}, State) ->
+   #state{shadows = Shadows, pending_queries = Queries} = State
+  ,ReqId = make_ref()
+  ,State1 = case maps:get(From, Shadows, undefined) of
+    undefined ->
+       Pid = start_shadow()
+      ,monitor(process, From)
+      ,State#state{shadows = maps:put(From, Pid, Shadows)}
+    ;
+    Pid ->
+       State
+    %~
+  end
+  ,Pid ! {forward, ReqId, Args}
+  ,{noreply, State1#state{pending_queries = maps:put(ReqId, Args, Queries)}}
+;
+
+%%------------------------------------------------------------------------------
+handle_cast({reply, ReqId, Result}, State) ->
+   #state{pending_queries = Queries, result_log = Log} = State
+  ,{noreply, State#state{
+     pending_queries = maps:remove(ReqId, Queries)
+    ,result_log = do_log(Log, Result)
+  }}
 .
 
 %%------------------------------------------------------------------------------
@@ -91,25 +137,46 @@ code_change(_ ,State ,_) ->
 %%-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 
 %%------------------------------------------------------------------------------
-do_forward(query, Args, Module) ->
+start_shadow() ->
+  spawn_opt(
+     fun loop_shadow/0
+    ,[link, {max_heap_size ,1000000} ,{message_queue_data ,on_heap}]
+  )
+.
+
+%%------------------------------------------------------------------------------
+loop_shadow() ->
+  receive
+    done ->
+      ok
+    ;
+    {forward, ReqId, Args} ->
+       gen_server:cast(?MODULE, {reply, ReqId, do_forward(Args)})
+      ,loop_shadow()
+    %~
+  end
+.
+
+%%------------------------------------------------------------------------------
+do_forward({query, Args, Module}) ->
   do_forward(Args, Module)
 ;
-do_forward(query_async, Args, Module) ->
+do_forward({query_async, Args, Module}) ->
   do_forward(Args, Module)
 ;
-do_forward(query_batch, Args, {rw, Module}) ->
+do_forward({query_batch, Args, {rw, Module}}) ->
   do_batch(Module, Args)
 ;
-do_forward(query_batch, Args, Module) ->
+do_forward({query_batch, Args, Module}) ->
   do_batch(Module, Args)
 ;
-do_forward(Other, _Args, _WModule) ->
+do_forward({Other, _Args, _WModule}) ->
   {skip, Other}
 .
 
 %%------------------------------------------------------------------------------
 do_batch(Module, Args) ->
-  spawn_link(Module, with_stream_do, [query_batch, Args])
+  Module:with_stream_do(query_batch, Args)
 .
 
 %%------------------------------------------------------------------------------
