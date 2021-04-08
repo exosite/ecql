@@ -38,6 +38,8 @@
         %,{replication_factor, [{"dc1", 3}, {"dc2", 2}]}
         ,{connections_per_host, 4}
         ,{streams_per_connection, 25}
+        ,{replicator_heap_size, 100000000}
+        ,{worker_max_heap_size, 10000000}
       ]}
     ]
   }

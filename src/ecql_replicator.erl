@@ -10,6 +10,8 @@
 -export([
    forward/3
   ,pending_queries/0
+  ,set_heap/1
+  ,set_worker_heap/1
 ]).
 
 %% OTP gen_server
@@ -32,6 +34,8 @@
    shadows, info_log, result_log, pending_queries
 }).
 
+%% Defines
+-define(HEAP, 10000000).
 %%-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 %% Public API
 %%-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
@@ -41,13 +45,29 @@ forward(Function, Args, Module) ->
   gen_server:cast(?MODULE, {forward, self(), {Function, Args, Module}})
 .
 
+
+%%------------------------------------------------------------------------------
+% in addition to setting the ecql:config() value this also send a message
+% to the replicator to adjust its max heap at runtime
+set_heap(MaxHeapSize) when is_integer(MaxHeapSize) ->
+  gen_server:cast(?MODULE, {set_heap, MaxHeapSize})
+.
+
+%%------------------------------------------------------------------------------
+% in addition to setting the ecql:config() value this also send a message
+% to all workers which then will adjust their max heap size
+set_worker_heap(MaxHeapSize) when is_integer(MaxHeapSize) ->
+  gen_server:cast(?MODULE, {set_worker_heap, MaxHeapSize})
+.
+
 %%-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 %% OTP gen_server API
 %%-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 
 %%------------------------------------------------------------------------------
 start_link() ->
-   Opts = [{spawn_opt ,[{max_heap_size ,100000000} ,{message_queue_data ,on_heap}]}]
+   Heap = unless(ecql:config(replicator_heap_size), 100000000)
+  ,Opts = [{spawn_opt ,[{max_heap_size ,Heap} ,{message_queue_data ,on_heap}]}]
   ,gen_server:start_link({local, ?MODULE}, ?MODULE, {}, Opts)
 .
 
@@ -120,6 +140,20 @@ handle_cast({reply, ReqId, Result}, State) ->
      pending_queries = maps:remove(ReqId, Queries)
     ,result_log = do_log(Log, Result)
   }}
+;
+
+%%------------------------------------------------------------------------------
+handle_cast({set_heap, MaxHeapSize}, State) ->
+   ecql:config(replicator_heap_size, MaxHeapSize)
+  ,process_flag(max_heap_size, MaxHeapSize)
+  ,{noreply, State}
+;
+
+%%------------------------------------------------------------------------------
+handle_cast({set_worker_heap, MaxHeapSize}, State = #state{shadows = Pids}) ->
+   ecql:config(worker_max_heap_size, MaxHeapSize)
+  ,lists:foreach(fun(Pid) -> Pid ! set_worker_heap  end, maps:values(Pids))
+  ,{noreply, State}
 .
 
 %%------------------------------------------------------------------------------
@@ -137,16 +171,27 @@ code_change(_ ,State ,_) ->
 %%-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 
 %%------------------------------------------------------------------------------
+unless(undefined, Default) -> Default;
+unless(Other, _Default) -> Other.
+
+%%------------------------------------------------------------------------------
 start_shadow() ->
-  spawn_opt(
+   % default can only be used when through a hot-upgrade the term is not set
+   MaxHeapSize = unless(ecql:config(worker_max_heap_size), ?HEAP)
+  ,spawn_opt(
      fun loop_shadow/0
-    ,[link, {max_heap_size ,1000000} ,{message_queue_data ,on_heap}]
+    ,[link, {max_heap_size ,MaxHeapSize} ,{message_queue_data ,on_heap}]
   )
 .
 
 %%------------------------------------------------------------------------------
 loop_shadow() ->
   receive
+    set_worker_heap ->
+       MaxHeapSize = ecql:config(worker_max_heap_size)
+      ,process_flag(max_heap_size, MaxHeapSize)
+      ,ok
+    ;
     done ->
       ok
     ;
