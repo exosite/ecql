@@ -9,9 +9,11 @@
 %% Public API
 -export([
    forward/3
+  ,forward/4
   ,pending_queries/0
   ,set_heap/1
   ,set_worker_heap/1
+  ,max_ref_size/0
 ]).
 
 %% OTP gen_server
@@ -36,6 +38,14 @@
 
 %% Defines
 -define(HEAP, 10000000).
+-define(MAX_REF, 100000).
+-define(
+   ERROR_MSG
+  ,"replicator received differing results: query: ~p~n"
+   "reference: ~p~n"
+   "received : ~p~n"
+).
+
 %%-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 %% Public API
 %%-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
@@ -45,6 +55,10 @@ forward(Function, Args, Module) ->
   gen_server:cast(?MODULE, {forward, self(), {Function, Args, Module}})
 .
 
+%%------------------------------------------------------------------------------
+forward(Function, Args, Module, Ref) ->
+  gen_server:cast(?MODULE, {forward, self(), {Function, Args, Module}, Ref})
+.
 
 %%------------------------------------------------------------------------------
 % in addition to setting the ecql:config() value this also send a message
@@ -58,6 +72,11 @@ set_heap(MaxHeapSize) when is_integer(MaxHeapSize) ->
 % to all workers which then will adjust their max heap size
 set_worker_heap(MaxHeapSize) when is_integer(MaxHeapSize) ->
   gen_server:cast(?MODULE, {set_worker_heap, MaxHeapSize})
+.
+
+%%------------------------------------------------------------------------------
+max_ref_size() ->
+  unless(ecql:config(max_ref_size), ?MAX_REF)
 .
 
 %%-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
@@ -116,26 +135,45 @@ handle_call(pending_queries, _From, State) ->
 .
 
 %%------------------------------------------------------------------------------
-handle_cast({forward, From, Args}, State) ->
-   #state{shadows = Shadows, pending_queries = Queries} = State
-  ,ReqId = make_ref()
-  ,State1 = case maps:get(From, Shadows, undefined) of
-    undefined ->
-       Pid = start_shadow()
-      ,monitor(process, From)
-      ,State#state{shadows = maps:put(From, Pid, Shadows)}
-    ;
-    Pid ->
-       State
-    %~
-  end
-  ,Pid ! {forward, ReqId, Args}
+handle_cast({forward, From, Args, Ref}, #state{pending_queries = Queries} = State) ->
+   ReqId = make_ref()
+  ,State1 = handle_forward(ReqId, From, Args, State)
+  ,{noreply, State1#state{pending_queries = maps:put(ReqId, {Args, Ref}, Queries)}}
+;
+
+%%------------------------------------------------------------------------------
+handle_cast({forward, From, Args}, #state{pending_queries = Queries} = State) ->
+   ReqId = make_ref()
+  ,State1 = handle_forward(ReqId, From, Args, State)
   ,{noreply, State1#state{pending_queries = maps:put(ReqId, Args, Queries)}}
+;
+
+%%------------------------------------------------------------------------------
+% these are reads in simple write replication mode
+handle_cast({reply, ReqId, false}, State) ->
+   #state{pending_queries = Queries} = State
+  ,{noreply, State#state{
+     pending_queries = maps:remove(ReqId, Queries)
+  }}
+;
+
+%%------------------------------------------------------------------------------
+% these are continuations and other driver specific calls we can't replicate
+handle_cast({reply, ReqId, {skip, _}}, State) ->
+   #state{pending_queries = Queries} = State
+  ,{noreply, State#state{
+     pending_queries = maps:remove(ReqId, Queries)
+  }}
 ;
 
 %%------------------------------------------------------------------------------
 handle_cast({reply, ReqId, Result}, State) ->
    #state{pending_queries = Queries, result_log = Log} = State
+  ,case maps:get(ReqId, Queries, undefined) of
+    {_, Result} -> ok;
+    {Args, Ref} -> error_logger:info_msg(?ERROR_MSG, [Args, Ref, Result]);
+    _Other -> ok
+  end
   ,{noreply, State#state{
      pending_queries = maps:remove(ReqId, Queries)
     ,result_log = do_log(Log, Result)
@@ -203,32 +241,38 @@ loop_shadow() ->
 .
 
 %%------------------------------------------------------------------------------
-do_forward({query, Args, Module}) ->
-  do_forward(Args, Module)
-;
-do_forward({query_async, Args, Module}) ->
-  do_forward(Args, Module)
-;
-do_forward({query_batch, Args, {rw, Module}}) ->
-  do_batch(Module, Args)
-;
-do_forward({query_batch, Args, Module}) ->
-  do_batch(Module, Args)
-;
-do_forward({Other, _Args, _WModule}) ->
-  {skip, Other}
+handle_forward(ReqId, From, Args, #state{shadows = Shadows} = State) ->
+  State1 = case maps:get(From, Shadows, undefined) of
+    undefined ->
+       Pid = start_shadow()
+      ,monitor(process, From)
+      ,State#state{shadows = maps:put(From, Pid, Shadows)}
+    ;
+    Pid ->
+       State
+    %~
+  end
+  ,Pid ! {forward, ReqId, Args}
+  ,State1
 .
 
 %%------------------------------------------------------------------------------
-do_batch(Module, Args) ->
-  Module:with_stream_do(query_batch, Args)
+do_forward({Op, Args, Module}) ->
+  case Op of
+    query -> do_forward(Op, Args, Module);
+    query_async -> do_forward(Op, Args, Module);
+    query_batch -> do_forward(Op, Args, Module);
+    Other -> {skip, Other}
+  end
 .
 
 %%------------------------------------------------------------------------------
-do_forward([Cql, Args, Consistency], {rw, Module}) ->
-  Module:with_stream_do(query_async, [Cql, Args, Consistency])
+% in rw (and rwv) mode we forward ops directly
+do_forward(Op, Args, {rw, Module}) ->
+  Module:with_stream_do(Op, Args)
 ;
-do_forward([Cql, Args, Consistency], Module) ->
+% otherwise we only take modifying ops
+do_forward(Op, [Cql, Args, Consistency], Module) ->
    Command = binary:bin_to_list(iolist_to_binary(Cql), {0, 4})
   ,Forward = case string:uppercase(Command) of
     "DROP" -> true;
@@ -239,7 +283,7 @@ do_forward([Cql, Args, Consistency], Module) ->
     "DELE" -> true;
     _AllElse -> false
   end
-  ,Forward andalso Module:with_stream_do(query_async, [Cql, Args, Consistency])
+  ,Forward andalso Module:with_stream_do(Op, [Cql, Args, Consistency])
 .
 
 %%------------------------------------------------------------------------------

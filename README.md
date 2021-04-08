@@ -21,10 +21,12 @@ The `module` configuration parameter supports four difference values:
 * `undefined` - same as `ecql_native`
 * `{_Primary, _Secondary}` - The first module is used for all reads+writes, the second module receives a copy of ONLY write actions
     * `{ecql_native, ecql_erlcass}`
-    * `{ecql_erlcass, ecql_native}` -
+    * `{ecql_erlcass, ecql_native}`
 * `{_Primary, {rw, _Secondary}}` - The first module is used for all reads+writes, the second module receives a copy of each write AND each read action
     * `{ecql_native, {rw, ecql_erlcass}}`
-    * `{ecql_erlcass, {rw, ecql_native}}` -
+    * `{ecql_erlcass, {rw, ecql_native}}`
+
+* `{_Primary, {rwv, _Secondary}}` - Same as rw but adds validation to the read duplicated result
 
 `ecql:execute/1,2,3`
 ------------------

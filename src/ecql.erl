@@ -102,6 +102,12 @@ config(Key) ->
 .
 
 %%------------------------------------------------------------------------------
+config(module, Value) ->
+  case validate_module(Value) of
+     ok -> ecql_native:config(module, Value);
+     Other -> Other
+  end
+;
 config(Key, Value) ->
   ecql_native:config(Key, Value)
 .
@@ -350,6 +356,19 @@ escape(List) ->
 .
 
 %%------------------------------------------------------------------------------
+validate_module(ecql_native) -> ok;
+validate_module(ecql_erlcass) -> ok;
+validate_module({A, {rw, B}}) -> validate_module({A, B});
+validate_module({A, {rwv, B}}) -> validate_module({A, B});
+validate_module({A, B}) when is_atom(A), is_atom(B) ->
+  case validate_module(A) of
+    ok -> validate_module(B);
+    Other -> Other
+  end
+;
+validate_module(Other) -> {error, {invalid_module_value, Other}}.
+
+%%------------------------------------------------------------------------------
 % This indexof fails on not found
 indexof(Element, [Element | _]) ->
   0
@@ -361,6 +380,14 @@ indexof(Element, [_ | Tail]) ->
 %%------------------------------------------------------------------------------
 with_stream_do(Function, Args) ->
   case config(module) of
+    {RwModule, {rwv, WModule}} ->
+       Ret = RwModule:with_stream_do(Function, Args)
+      ,case erts_debug:flat_size(Ret) < ecql_replicator:max_ref_size() of
+        true -> ecql_replicator:forward(Function, Args, {rw, WModule}, Ret);
+        false -> ecql_replicator:forward(Function, Args, {rw, WModule})
+      end
+      ,Ret
+    ;
     {RwModule, WModule} ->
        ecql_replicator:forward(Function, Args, WModule)
       ,RwModule:with_stream_do(Function, Args)
