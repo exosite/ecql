@@ -5,30 +5,24 @@
 %%==============================================================================
 
   {
-     "v1.5"
+     "v1.6"
     ,[
       {
-         "v1.3"
+         "v1.5"
         ,[
-           {add_module ,ecql_replicator}
-          ,{update ,ecql_sup ,supervisor}
-          ,{apply ,{supervisor ,restart_child ,[ecql_sup ,ecql_replicator]}}
-          % Casts to ecql_replicator gen_server
+           {apply ,{op_install ,update_config ,["2021-04-08" ,ecql]}}
+          ,{load_module ,ecql_replicator}
           ,{load_module ,ecql}
-          % Updated to unlogged batch
-          ,{load_module ,ecql_erlcass}
         ]
       }
     ]
     ,[
       {
-         "v1.3"
+         "v1.5"
         ,[
            {load_module ,ecql}
-          ,{load_module ,ecql_erlcass}
-          ,{update ,ecql_sup ,supervisor}
-          ,{apply ,{supervisor ,delete_child ,[ecql_sup ,ecql_replicator]}}
-          ,{delete_module ,ecql_replicator}
+          ,{load_module ,ecql_replicator}
+          ,{apply ,{op_install ,update_config ,["2021-04-05" ,ecql]}}
         ]
       }
     ]
