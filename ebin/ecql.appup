@@ -5,24 +5,20 @@
 %%==============================================================================
 
   {
-     "v1.6"
+     "v1.7"
     ,[
       {
-         "v1.5"
+         "v1.6"
         ,[
-           {apply ,{op_install ,update_config ,["2021-04-08" ,ecql]}}
-          ,{load_module ,ecql_replicator}
-          ,{load_module ,ecql}
+          {load_module ,ecql_replicator}
         ]
       }
     ]
     ,[
       {
-         "v1.5"
+         "v1.6"
         ,[
-           {load_module ,ecql}
-          ,{load_module ,ecql_replicator}
-          ,{apply ,{op_install ,update_config ,["2021-04-05" ,ecql]}}
+          {load_module ,ecql_replicator}
         ]
       }
     ]
