@@ -11,6 +11,7 @@
    forward/3
   ,forward/4
   ,pending_queries/0
+  ,flush_pending_queries/0
   ,set_heap/1
   ,set_worker_heap/1
   ,max_ref_size/0
@@ -111,6 +112,11 @@ pending_queries() ->
 .
 
 %%------------------------------------------------------------------------------
+flush_pending_queries() ->
+  gen_server:cast(?MODULE, flush_pending_queries)
+.
+
+%%------------------------------------------------------------------------------
 handle_info({'DOWN', _Ref, process, Pid, _Info}, State) ->
    maps:get(Pid, State#state.shadows) ! done
   ,{noreply, State#state{
@@ -133,6 +139,11 @@ handle_call(stop, _From, State) ->
 handle_call(pending_queries, _From, State) ->
   {reply, maps:size(State#state.pending_queries), State}
 .
+
+%%------------------------------------------------------------------------------
+handle_cast(flush_pending_queries, State) ->
+  {noreply, State#state{pending_queries = #{}}}
+;
 
 %%------------------------------------------------------------------------------
 handle_cast({forward, From, Args, Ref}, #state{pending_queries = Queries} = State) ->
@@ -228,7 +239,7 @@ loop_shadow() ->
     set_worker_heap ->
        MaxHeapSize = ecql:config(worker_max_heap_size)
       ,process_flag(max_heap_size, MaxHeapSize)
-      ,ok
+      ,loop_shadow()
     ;
     done ->
       ok
@@ -248,8 +259,17 @@ handle_forward(ReqId, From, Args, #state{shadows = Shadows} = State) ->
       ,monitor(process, From)
       ,State#state{shadows = maps:put(From, Pid, Shadows)}
     ;
-    Pid ->
-       State
+    APid ->
+      case is_process_alive(APid) of
+        true ->
+           Pid = APid
+          ,State
+        ;
+        false ->
+           Pid = start_shadow()
+          ,State#state{shadows = maps:put(From, Pid, Shadows)}
+        %~
+      end
     %~
   end
   ,Pid ! {forward, ReqId, Args}
