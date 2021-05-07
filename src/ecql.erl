@@ -382,14 +382,14 @@ with_stream_do(Function, Args) ->
   case config(module) of
     {RwModule, {rwv, WModule}} ->
        Ret = RwModule:with_stream_do(Function, Args)
-      ,case erts_debug:flat_size(Ret) < ecql_replicator:max_ref_size() of
-        true -> ecql_replicator:forward(Function, Args, {rw, WModule}, Ret);
-        false -> ecql_replicator:forward(Function, Args, {rw, WModule})
+      ,case erts_debug:flat_size(Ret) < ecql_replicator2:max_ref_size() of
+        true -> ecql_replicator2:forward(Function, Args, {rw, WModule}, Ret);
+        false -> ecql_replicator2:forward(Function, Args, {rw, WModule})
       end
       ,Ret
     ;
     {RwModule, WModule} ->
-       ecql_replicator:forward(Function, Args, WModule)
+       ecql_replicator2:forward(Function, Args, WModule)
       ,RwModule:with_stream_do(Function, Args)
     ;
     undefined ->
