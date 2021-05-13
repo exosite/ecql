@@ -5,28 +5,20 @@
 %%==============================================================================
 
   {
-     "v1.8"
+     "v1.9"
     ,[
       {
-         "v1.7"
+         "v1.8"
         ,[
-           {add_module ,ecql_replicator_shadow}
-          ,{add_module ,ecql_replicator2}
-          ,{update ,ecql_sup ,supervisor}
-          ,{apply ,{supervisor ,restart_child ,[ecql_sup ,ecql_replicator2]}}
-          ,{load_module ,ecql}
+          {load_module ,ecql_erlcass}
         ]
       }
     ]
     ,[
       {
-         "v1.7"
+         "v1.8"
         ,[
-           {load_module ,ecql}
-          ,{update ,ecql_sup ,supervisor}
-          ,{apply ,{supervisor ,terminate_child ,[ecql_sup ,ecql_replicator2]}}
-          ,{delete_module ,ecql_replicator2}
-          ,{delete_module ,ecql_replicator_shadow}
+          {load_module ,ecql_erlcass}
         ]
       }
     ]
