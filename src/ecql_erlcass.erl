@@ -11,7 +11,13 @@
 
 %% Public API
 -export([
-  with_stream_do/2
+    with_stream_do/2
+]).
+
+%% Private API exposed for MFA apply()
+-export([
+     do_execute_paged/2
+    ,do_execute/3
 ]).
 
 %%-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
@@ -33,7 +39,7 @@ with_stream_do(query_page, [Cql, Args, Consistency]) ->
     ,with_stream_do(query_page, [{Statement, Atom}])
 ;
 with_stream_do(query_page, [{Statement, Atom}]) ->
-    case execute_paged(Statement, Atom) of
+    case retry(?MODULE, do_execute_paged, [Statement, Atom]) of
         {ok, Heads, Rows} ->
             Names = lists:map(fun({Name, _Type}) ->
                  binary_to_atom(Name, utf8)
@@ -69,7 +75,11 @@ with_stream_do(query_batch, [Cql, ListOfArgs, Consistency]) ->
         ,ok = erlcass:bind_prepared_params_by_index(Stmt, Args1)
         ,Stmt
     end, ListOfArgs)
-    ,erlcass:batch_execute(?CASS_BATCH_TYPE_UNLOGGED, Stmts, [{consistency_level, Consistency}])
+    ,retry(
+         erlcass
+        ,batch_execute
+        ,[?CASS_BATCH_TYPE_UNLOGGED, Stmts, [{consistency_level, Consistency}]]
+    )
 ;
 with_stream_do(foldl, [Fun, Acc, Cql, Args, Consistency]) ->
     Ret = with_stream_do(query_page, [Cql, Args, Consistency])
@@ -98,7 +108,7 @@ do_foldl(_Fun, Acc, '$end_of_table') ->
 execute(Cql, Args, Consistency) ->
      Atom = prepare_statement(Cql, Consistency)
     ,Args1 = lists:map(fun convert_arg/1, Args)
-    ,case do_execute(Atom, ?BIND_BY_INDEX, Args1) of
+    ,case retry(?MODULE, do_execute, [Atom, ?BIND_BY_INDEX, Args1]) of
         ok ->
             ok
         ;
@@ -201,10 +211,10 @@ convert(?CL_SERIAL) -> ?CASS_CONSISTENCY_SERIAL;
 convert(?CL_LOCAL_SERIAL) -> ?CASS_CONSISTENCY_LOCAL_SERIAL;
 convert(?CL_LOCAL_ONE) -> ?CASS_CONSISTENCY_LOCAL_ONE.
 
-
 %%------------------------------------------------------------------------------
 do_execute(Identifier, BindType, Params) ->
-    case erlcass:async_execute(Identifier, BindType, Params) of
+    Ret = erlcass:async_execute(Identifier, BindType, Params),
+    case Ret of
         {ok, Tag} -> receive_response(Tag);
         Error -> Error
     end
@@ -219,7 +229,7 @@ receive_response(Tag) ->
 .
 
 %%------------------------------------------------------------------------------
-execute_paged(Stm, Identifier) ->
+do_execute_paged(Stm, Identifier) ->
     ok = erlcass:set_paging_size(Stm, 1000),
     case erlcass:async_execute_paged(Stm, Identifier) of
         {ok, Tag} -> receive_paged_response(Tag);
@@ -232,6 +242,55 @@ execute_paged(Stm, Identifier) ->
 receive_paged_response(Tag) ->
     receive
         {execute_statement_result, Tag, Result} -> Result
+    end
+.
+
+%%------------------------------------------------------------------------------
+retry(M, F, A) ->
+    retry({M, F, A}, 0)
+.
+
+%%------------------------------------------------------------------------------
+retry({M, F, A}, 1) ->
+    apply(M, F, A)
+;
+retry(Mfa = {M, F, A}, N) ->
+    case apply(M, F, A) of
+        {error, <<"No hosts available", _/binary>> = Msg} ->
+            do_retry(Mfa, N, Msg)
+    ;
+        Ret ->
+            Ret
+    %~
+  end
+.
+
+%%------------------------------------------------------------------------------
+do_retry(Mfa, N, Msg) ->
+    case config_default(retry_limit, 1) of
+        Limit when N < Limit ->
+            error_logger:error_info(
+                "ecql_erlcass: Query failed with ~p retry: ~p",
+                [N, Msg]
+            ),
+            timer:sleep(config_default(retry_sleep, 200)),
+            retry(Mfa, N + 1)
+        ;
+        _ ->
+            error_logger:error_info(
+                "ecql_erlcass: Query failed with ~p aborting",
+                [Msg]
+            ),
+            {error, Msg}
+        %~
+    end
+.
+
+%%------------------------------------------------------------------------------
+config_default(Key, Default) ->
+    case ecql:config(Key) of
+        undefined -> Default;
+        Other -> Other
     end
 .
 

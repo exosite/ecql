@@ -41,6 +41,8 @@
         ,{replicator_heap_size, 100000000}
         ,{worker_max_heap_size, 10000000}
         ,{max_ref_size, 100000}
+        ,{retry_limit, 1}
+        ,{retry_sleep, 200}
       ]}
     ]
   }
