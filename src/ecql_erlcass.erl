@@ -186,9 +186,10 @@ prepare_statement(Cql, Consistency) ->
     [] ->
          Atom = binary_to_atom(base64:encode(crypto:hash(sha256, Statement)), utf8)
         ,case erlcass:add_prepare_statement(Atom, {Statement, [{consistency_level, convert(Consistency)}]}) of
-            ok -> ets:insert(ecql_erlcass_statements, {Statement, Atom});
+            ok -> ok;
             {error,already_exist} -> ok
         end
+        ,ets:insert(ecql_erlcass_statements, {Statement, Atom})
         ,Atom
      ;
     [{Statement, Atom}] ->
