@@ -185,7 +185,12 @@ prepare_statement(Cql, Consistency) ->
   ,case ets:lookup(ecql_erlcass_statements, Statement) of
     [] ->
          Atom = binary_to_atom(base64:encode(crypto:hash(sha256, Statement)), utf8)
-        ,case erlcass:add_prepare_statement(Atom, {Statement, [{consistency_level, convert(Consistency)}]}) of
+        ,Ret = retry(
+           erlcass
+          ,add_prepare_statement
+          ,[Atom, {Statement, [{consistency_level, convert(Consistency)}]}]
+        )
+        ,case Ret of
             ok -> ok;
             {error,already_exist} -> ok
         end
