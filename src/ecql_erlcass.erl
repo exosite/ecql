@@ -265,6 +265,9 @@ retry(Mfa = {M, F, A}, N) ->
         {error, <<"No hosts available", _/binary>> = Msg} ->
             do_retry(Mfa, N, Msg)
     ;
+        {error, <<"All hosts", _/binary>> = Msg} ->
+            do_retry(Mfa, N, Msg)
+    ;
         Ret ->
             Ret
     %~
@@ -275,7 +278,7 @@ retry(Mfa = {M, F, A}, N) ->
 do_retry(Mfa, N, Msg) ->
     case config_default(retry_limit, 1) of
         Limit when N < Limit ->
-            error_logger:error_info(
+            error_logger:error_msg(
                 "ecql_erlcass: Query failed with ~p retry: ~p",
                 [N, Msg]
             ),
@@ -283,7 +286,7 @@ do_retry(Mfa, N, Msg) ->
             retry(Mfa, N + 1)
         ;
         _ ->
-            error_logger:error_info(
+            error_logger:error_msg(
                 "ecql_erlcass: Query failed with ~p aborting",
                 [Msg]
             ),
