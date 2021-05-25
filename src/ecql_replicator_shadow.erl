@@ -69,7 +69,8 @@ handle_info(done, State = #state{queue = Queue0}) ->
     ;
     {{value, {forward ,ReqId ,Args}}, Queue} ->
        gen_server:cast(ecql_replicator2, {reply, ReqId, do_forward(Args)})
-      ,handle_info(done, State#state{queue = Queue})
+      ,self() ! done
+      ,{noreply, State#state{queue = Queue}}
     %~
   end
 .
@@ -102,6 +103,8 @@ code_change(_ ,State ,_) ->
 consume_queue(Item, State0 = #state{queue = Queue}) ->
    State = State0#state{queue = queue:in(Item, Queue)}
   ,receive
+    process_queue ->
+       consume_queue(Item, State0);
     Next = {forward ,_ReqId ,_Args} ->
        consume_queue(Next, State)
     %~
@@ -124,8 +127,21 @@ do_forward({Op, Args, Module}) ->
 
 %%------------------------------------------------------------------------------
 % in rw (and rwv) mode we forward ops directly
-do_forward(Op, Args, {rw, Module}) ->
-  Module:with_stream_do(Op, Args)
+do_forward(Op, [Cql0, Args, Consistency], {rw, Module}) ->
+   Cql = iolist_to_binary(Cql0)
+  ,Command = binary:bin_to_list(Cql, {0, 4})
+  ,Forward = case string:uppercase(Command) of
+    "SELE" ->
+      % only exception to query forwarding are schema queries as they are neither
+      % forwards nor backwards compatible between 2.x and 3.x
+      (not contains(Cql, <<"system.schema_columnfamilies">>)) andalso
+      (not contains(Cql, <<"system_schema.tables">>))
+    ;
+    _AllElse ->
+      true
+    %~
+  end
+  ,with_stream_do(Forward, Module, Op, Cql, Args, Consistency)
 ;
 % otherwise we only take modifying ops
 do_forward(Op, [Cql, Args, Consistency], Module) ->
@@ -139,7 +155,31 @@ do_forward(Op, [Cql, Args, Consistency], Module) ->
     "DELE" -> true;
     _AllElse -> false
   end
-  ,Forward andalso Module:with_stream_do(Op, [Cql, Args, Consistency])
+  ,with_stream_do(Forward, Module, Op, Cql, Args, Consistency)
+.
+
+%%------------------------------------------------------------------------------
+with_stream_do(false, _Module, _Op, _Cql, _Args, _Consistency) ->
+  ok
+;
+with_stream_do(true, Module, Op, Cql, Args, Consistency) ->
+   Before = os:system_time(second)
+  ,Ret = Module:with_stream_do(Op, [Cql, Args, Consistency])
+  ,ElapsedS = os:system_time(second) - Before
+  ,(ElapsedS > 10) andalso
+    error_logger:warning_msg(
+       "Forwarded query took more than 10 seconds (~p): ~p (~p)"
+      ,[ElapsedS, Cql, Args]
+    )
+  ,Ret
+.
+
+%%------------------------------------------------------------------------------
+contains(Binary, Pattern) ->
+  case binary:match(Binary, Pattern) of
+    nomatch -> false;
+    _Other -> true
+  end
 .
 
 %%==============================================================================
