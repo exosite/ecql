@@ -257,9 +257,6 @@ retry(M, F, A) ->
 .
 
 %%------------------------------------------------------------------------------
-retry({M, F, A}, 1) ->
-    apply(M, F, A)
-;
 retry(Mfa = {M, F, A}, N) ->
     case apply(M, F, A) of
         {error, <<"No hosts available", _/binary>> = Msg} ->
