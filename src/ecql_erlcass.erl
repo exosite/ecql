@@ -146,6 +146,7 @@ do_text_to_list(Heads, Rows) ->
 .
 
 %%------------------------------------------------------------------------------
+convert_value(_, null) -> undefined;
 convert_value(text, Value) -> binary_to_list(Value);
 convert_value({map, text, text}, List) ->
     lists:map(
