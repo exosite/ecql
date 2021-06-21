@@ -5,6 +5,7 @@
 %%==============================================================================
 -module(ecql_cache).
 -behaviour(gen_server).
+-compile({no_auto_import,[nodes/0]}).
 
 %% Public API
 -export([
@@ -22,6 +23,9 @@
   ,clear_stats/0
   ,private_get/2
   ,private_set/2
+  ,replication_nodes/0
+  ,set_replication_nodes/1
+  ,nodes/0
 ]).
 
 %% OTP gen_server
@@ -77,7 +81,9 @@ get(Key, FunResult) ->
     ;
     undefined ->
        incr_stat(empty)
-      ,do_set(Key, FunResult())
+      ,Result = FunResult()
+      ,gen_server:abcast(replication_nodes(), ecql_cache, {push, Key, Result})
+      ,do_set(Key, Result)
     %~
   end
 .
@@ -113,11 +119,9 @@ set_stat(Key, Num) when is_integer(Num) ->
   private_set(Key, Num)
 .
 
-
 %%------------------------------------------------------------------------------
 dirty(Key) ->
-   Module = cluster_module()
-  ,gen_server:abcast(Module:nodes(), ?MODULE, {dirty, Key})
+   gen_server:abcast(nodes(), ?MODULE, {dirty, Key})
   ,do_dirty(Key)
   ,ok
 .
@@ -157,8 +161,7 @@ local_match_clear(_) ->
 
 %%------------------------------------------------------------------------------
 match_clear(Pattern) ->
-   ClusterModule = cluster_module()
-  ,gen_server:abcast(ClusterModule:nodes(), ?MODULE, {match_clear, Pattern})
+   gen_server:abcast(nodes(), ?MODULE, {match_clear, Pattern})
   ,local_match_clear(Pattern)
 .
 
@@ -170,7 +173,8 @@ set(Key, Result) ->
       ,Result
     ;
     undefined ->
-      do_set(Key, Result)
+       gen_server:abcast(replication_nodes(), ecql_cache, {push, Key, Result})
+      ,do_set(Key, Result)
     %~
   end
 .
@@ -185,6 +189,16 @@ do_set(Key, Result) ->
 .
 
 %%------------------------------------------------------------------------------
+set_replication_nodes(Replication) ->
+  persistent_term:put({ecql_cache, replication}, Replication)
+.
+
+%%------------------------------------------------------------------------------
+replication_nodes() ->
+  persistent_term:get({ecql_cache, replication}, [])
+.
+
+%%------------------------------------------------------------------------------
 set_cache_size(CacheSize) when is_integer(CacheSize) ->
   private_set(cache_size, CacheSize)
 .
@@ -192,6 +206,12 @@ set_cache_size(CacheSize) when is_integer(CacheSize) ->
 %%------------------------------------------------------------------------------
 set_cluster_module(Module) when is_atom(Module) ->
   private_set(cluster_module, Module)
+.
+
+%%------------------------------------------------------------------------------
+nodes() ->
+   ClusterModule = cluster_module()
+  ,ClusterModule:nodes()
 .
 
 %%-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
@@ -237,6 +257,10 @@ handle_cast(clear, State) ->
 ;
 handle_cast({dirty, Key}, State) ->
   do_dirty(Key)
+ ,{noreply, State}
+;
+handle_cast({push, Key, Result}, State) ->
+  do_set(Key, Result)
  ,{noreply, State}
 ;
 handle_cast({match_clear, Pattern}, State) ->
@@ -334,7 +358,6 @@ private_get(Key, Default) ->
 private_set(Key, Value) ->
   ets:insert(?MODULE, {Key, Value})
 .
-
 
 %%==============================================================================
 %% END OF FILE
