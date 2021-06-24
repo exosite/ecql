@@ -25,20 +25,48 @@
 %%-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 
 %%------------------------------------------------------------------------------
-with_stream_do(query, [Cql, Args, Consistency]) ->
+with_stream_do(release, []) ->
+  case get(last_ccon) of
+    undefined ->
+       ok;
+    Ref ->
+       gen_server:cast(ecql_erlcass_throttle, {release, Ref})
+      ,erase(last_ccon)
+    %~
+  end
+  ,ok
+;
+with_stream_do(Command, Args) ->
+  case get(last_ccon) of
+    undefined ->
+      put(last_ccon, gen_server:call(ecql_erlcass_throttle, acquire, infinity))
+    ;
+    _Ref ->
+      ok
+    %~
+  end
+  ,do_with_stream_do(Command, Args)
+.
+
+%%-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+%% Private API
+%%-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+
+%%------------------------------------------------------------------------------
+do_with_stream_do(query, [Cql, Args, Consistency]) ->
     execute(Cql, Args, Consistency)
 ;
-with_stream_do(query_async, [Cql, Args, Consistency]) ->
+do_with_stream_do(query_async, [Cql, Args, Consistency]) ->
     execute(Cql, Args, Consistency)
 ;
-with_stream_do(query_page, [Cql, Args, Consistency]) ->
+do_with_stream_do(query_page, [Cql, Args, Consistency]) ->
      Atom = prepare_statement(Cql, Consistency)
     ,Args1 = lists:map(fun convert_arg/1, Args)
     ,{ok, Statement} = erlcass:bind_prepared_statement(Atom)
     ,ok = erlcass:bind_prepared_params_by_index(Statement, Args1)
-    ,with_stream_do(query_page, [{Statement, Atom}])
+    ,do_with_stream_do(query_page, [{Statement, Atom}])
 ;
-with_stream_do(query_page, [{Statement, Atom}]) ->
+do_with_stream_do(query_page, [{Statement, Atom}]) ->
     case retry(?MODULE, do_execute_paged, [Statement, Atom]) of
         {ok, Heads, Rows} ->
             Names = lists:map(fun({Name, _Type}) ->
@@ -64,10 +92,10 @@ with_stream_do(query_page, [{Statement, Atom}]) ->
         %~
     end
 ;
-with_stream_do(query_page, ['$end_of_table']) ->
+do_with_stream_do(query_page, ['$end_of_table']) ->
     '$end_of_table'
 ;
-with_stream_do(query_batch, [Cql, ListOfArgs, Consistency]) ->
+do_with_stream_do(query_batch, [Cql, ListOfArgs, Consistency]) ->
      Name = prepare_statement(Cql, Consistency)
     ,Stmts = lists:map(fun(Args) ->
          {ok, Stmt} = erlcass:bind_prepared_statement(Name)
@@ -81,24 +109,28 @@ with_stream_do(query_batch, [Cql, ListOfArgs, Consistency]) ->
         ,[?CASS_BATCH_TYPE_UNLOGGED, Stmts, [{consistency_level, Consistency}]]
     )
 ;
-with_stream_do(foldl, [Fun, Acc, Cql, Args, Consistency]) ->
-    Ret = with_stream_do(query_page, [Cql, Args, Consistency])
+do_with_stream_do(foldl, [Fun, Acc, Cql, Args, Consistency]) ->
+    Ret = do_with_stream_do(query_page, [Cql, Args, Consistency])
     ,do_foldl(Fun, Acc, Ret)
 ;
-with_stream_do(release, []) ->
-    ok
+do_with_stream_do(release, []) ->
+    case get(last_ccon) of
+      undefined ->
+         ok;
+      Ref ->
+         gen_server:cast(ecql_erlcass_throttle, {release, Ref})
+        ,erase(last_ccon)
+      %~
+    end
+    ,ok
 ;
-with_stream_do(sync, []) ->
+do_with_stream_do(sync, []) ->
     ok
 .
 
-%%-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
-%% Private API
-%%-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
-
 %%------------------------------------------------------------------------------
 do_foldl(Fun, Acc, {{Keys, Rows}, Continuation}) ->
-    do_foldl(Fun, Fun(Keys, Rows, Acc), with_stream_do(query_page, [Continuation]))
+    do_foldl(Fun, Fun(Keys, Rows, Acc), do_with_stream_do(query_page, [Continuation]))
 ;
 do_foldl(_Fun, Acc, '$end_of_table') ->
     Acc
