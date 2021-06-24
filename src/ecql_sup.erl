@@ -28,6 +28,7 @@ init(_) ->
       ,[
         worker(ecql_etsman)
        ,worker(ecql_cache)
+       ,worker(ecql_erlcass_throttle)
        ,worker(ecql_native)
        ,worker(ecql_log)
        ,worker(ecql_replicator2)
