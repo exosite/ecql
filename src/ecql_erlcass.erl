@@ -64,7 +64,7 @@ do_with_stream_do(query_page, [Cql, Args, Consistency]) ->
     ,Args1 = lists:map(fun convert_arg/1, Args)
     ,{ok, Statement} = erlcass:bind_prepared_statement(Atom)
     ,ok = erlcass:bind_prepared_params_by_index(Statement, Args1)
-    ,do_with_stream_do(query_page, [{Statement, Atom}])
+    ,do_with_stream_do(query_page, [{Statement, {id, Atom, {Cql, Args}}}])
 ;
 do_with_stream_do(query_page, [{Statement, Atom}]) ->
     case retry(?MODULE, do_execute_paged, [Statement, Atom]) of
@@ -140,7 +140,7 @@ do_foldl(_Fun, Acc, '$end_of_table') ->
 execute(Cql, Args, Consistency) ->
      Atom = prepare_statement(Cql, Consistency)
     ,Args1 = lists:map(fun convert_arg/1, Args)
-    ,case retry(?MODULE, do_execute, [Atom, ?BIND_BY_INDEX, Args1]) of
+    ,case retry(?MODULE, do_execute, [{id, Atom, {Cql, Args}}, ?BIND_BY_INDEX, Args1]) of
         ok ->
             ok
         ;
@@ -251,12 +251,15 @@ convert(?CL_LOCAL_SERIAL) -> ?CASS_CONSISTENCY_LOCAL_SERIAL;
 convert(?CL_LOCAL_ONE) -> ?CASS_CONSISTENCY_LOCAL_ONE.
 
 %%------------------------------------------------------------------------------
-do_execute(Identifier, BindType, Params) ->
-    Ret = erlcass:async_execute(Identifier, BindType, Params),
-    case Ret of
-        {ok, Tag} -> receive_response(Tag);
-        Error -> Error
-    end
+do_execute({id ,Identifier, {OrgCql, OrgParams}}, BindType, Params) ->
+    {Time, Ret} = timer:tc(fun() ->
+        case erlcass:async_execute(Identifier, BindType, Params) of
+            {ok, Tag} -> receive_response(Tag);
+            Error -> Error
+        end
+    end),
+    ecql_log:log(Time, query, OrgCql, OrgParams),
+    Ret
 .
 
 %%------------------------------------------------------------------------------
@@ -268,12 +271,16 @@ receive_response(Tag) ->
 .
 
 %%------------------------------------------------------------------------------
-do_execute_paged(Stm, Identifier) ->
+do_execute_paged(Stm, {id ,Identifier, {OrgCql, OrgParams}}) ->
     ok = erlcass:set_paging_size(Stm, 1000),
-    case erlcass:async_execute_paged(Stm, Identifier) of
-        {ok, Tag} -> receive_paged_response(Tag);
-        Error -> Error
-    end
+    {Time, Ret} = timer:tc(fun() ->
+        case erlcass:async_execute_paged(Stm, Identifier) of
+            {ok, Tag} -> receive_paged_response(Tag);
+            Error -> Error
+        end
+    end),
+    ecql_log:log(Time, paged, OrgCql, OrgParams),
+    Ret
 .
 
 %%------------------------------------------------------------------------------
