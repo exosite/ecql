@@ -6,6 +6,11 @@
 -module(ecql_erlcass_throttle).
 -behaviour(gen_server).
 
+%% Public API
+-export([
+   pending_queries/0
+]).
+
 %% OTP gen_server
 -export([
    init/1
@@ -20,6 +25,13 @@
 
 %% Includes
 -include("ecql.hrl").
+
+%%-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+%% Public API
+%%-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+pending_queries() ->
+  gen_server:call(?MODULE ,pending_queries, 1000)
+.
 
 %%-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
 %% OTP gen_server API
@@ -43,6 +55,9 @@ stop() ->
 .
 
 %%------------------------------------------------------------------------------
+handle_call(pending_queries, _From, State = #{waiting := Queue}) ->
+   {reply, queue:len(Queue) ,State}
+;
 handle_call(acquire, From, State = #{waiting := Queue}) ->
    {noreply, process_waiting(State#{waiting => queue:in(From, Queue)})}
 .
