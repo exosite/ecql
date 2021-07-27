@@ -5,32 +5,20 @@
 %%==============================================================================
 
   {
-     "v1.13"
+     "v1.14"
     ,[
       {
-         "v1.12"
+         "v1.13"
         ,[
-           {add_module ,ecql_monitor}
-          ,{add_module ,ecql_erlcass_throttle}
-          ,{update ,ecql_sup ,supervisor}
-          ,{apply ,{supervisor ,restart_child ,[ecql_sup ,ecql_monitor]}}
-          ,{load_module ,ecql_cache}
-          ,{apply ,{supervisor ,restart_child ,[ecql_sup ,ecql_erlcass_throttle]}}
-          ,{load_module ,ecql_erlcass}
+           {load_module ,ecql_mnesia}
         ]
       }
     ]
     ,[
       {
-         "v1.12"
+         "v1.13"
         ,[
-           {load_module ,ecql_cache}
-          ,{load_module ,ecql_erlcass}
-          ,{update ,ecql_sup ,supervisor}
-          ,{apply ,{supervisor ,terminate_child ,[ecql_sup ,ecql_monitor]}}
-          ,{delete_module ,ecql_monitor}
-          ,{apply ,{supervisor ,terminate_child ,[ecql_sup ,ecql_erlcass_throttle]}}
-          ,{delete_module ,ecql_erlcass_throttle}
+           {load_module ,ecql_mnesia}
         ]
       }
     ]
