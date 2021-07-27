@@ -261,16 +261,18 @@ do_delete_object(set, RecordName, RecordValues) ->
   Ret = ecql:execute(
      ["DELETE FROM ", map_recordname(RecordName), " WHERE a = ?"]
     ,[ecql:term_to_bin(hd(RecordValues))]
-  )
+    ,persistent_term:get({?MODULE, write_cl}, ?CL_LOCAL_QUORUM)
+ )
   ,dirty_cache([RecordName | RecordValues])
   ,Ret
 ;
 do_delete_object(bag, RecordName, RecordValues) ->
    {Keys, Values} = and_pairs(RecordValues)
-  ,ecql:execute([
-     "DELETE FROM ", map_recordname(RecordName)
-    ," WHERE ", Keys
-  ], Values)
+  ,ecql:execute(
+     ["DELETE FROM ", map_recordname(RecordName), " WHERE ", Keys]
+    ,Values
+    ,persistent_term:get({?MODULE, write_cl}, ?CL_LOCAL_QUORUM)
+  )
 .
 
 %%------------------------------------------------------------------------------
@@ -774,7 +776,7 @@ do_update_element(bag, RecordName, Key, List) ->
       ,string:copies(",?", length(RecordValues) - 1) ,");"
     ]
     ,[ecql:term_to_bin(Value) || Value <- RecordValues]
-    ,?CL_LOCAL_QUORUM
+    ,persistent_term:get({?MODULE, write_cl}, ?CL_LOCAL_QUORUM)
   )
 .
 
