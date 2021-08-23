@@ -23,6 +23,7 @@
       ]}
       ,{env, [
          {cache_size, 1000000}
+        ,{cache_compress, false}
         ,{cluster_module, erlang}
         ,{module, ecql_native}
         ,{log, disabled}

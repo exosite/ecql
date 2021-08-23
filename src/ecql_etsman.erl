@@ -37,9 +37,15 @@ init(_) ->
 .
 ensure_ets_tables() ->
    ensure_ets_table(ecql_cache, [{write_concurrency, true}])
+  ,Configuration = application:get_all_env()
+  ,Compression = proplists:get_value(cache_compress, Configuration, false)
+  ,Opts = case Compression of
+    true -> [compressed];
+    false -> []
+  end
   ,lists:foreach(
     fun(Atom) ->
-      ensure_ets_table(Atom, [{write_concurrency, true}])
+      ensure_ets_table(Atom, [{write_concurrency, true} | Opts])
     end
     ,?CACHE_SLICES_LIST
   )
