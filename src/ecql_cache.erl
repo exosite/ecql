@@ -12,10 +12,12 @@
    cache_size/0
   ,cluster_module/0
   ,clear/0
+  ,peek/1
   ,get/2
   ,dirty/1
   ,local_match_clear/1
   ,match_clear/1
+  ,set_all/2
   ,set/2
   ,set_cache_size/1
   ,set_cluster_module/1
@@ -71,6 +73,14 @@ current_slice() ->
 %%------------------------------------------------------------------------------
 clear() ->
   gen_server:abcast(?MODULE, clear)
+.
+
+%%------------------------------------------------------------------------------
+peek(Key) ->
+  case find(Key) of
+    {_Slice, Value} -> {value, Value};
+    undefined -> undefined
+  end
 .
 
 %%------------------------------------------------------------------------------
@@ -163,6 +173,20 @@ local_match_clear(_) ->
 match_clear(Pattern) ->
    gen_server:abcast(nodes(), ?MODULE, {match_clear, Pattern})
   ,local_match_clear(Pattern)
+.
+
+%%------------------------------------------------------------------------------
+set_all(Key, Result) ->
+   gen_server:abcast(nodes(), ?MODULE, {push, Key, Result})
+  ,case find(Key) of
+    {Slice, _Value} ->
+       ets:insert(Slice, {Key, Result})
+      ,Result
+    ;
+    undefined ->
+       do_set(Key, Result)
+    %~
+  end
 .
 
 %%------------------------------------------------------------------------------
