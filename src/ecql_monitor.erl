@@ -80,8 +80,9 @@ handle_info(ping, State = #{want_replication := WR}) ->
   %% Checking local cache size and disabling want bit if >50%
    Capacity = ecql_cache:cache_size()
   ,Infos = [ets:info(Table) || Table <- ?CACHE_SLICES_LIST]
-  ,Count = lists:foldl(fun(Info, C) ->
-    C + proplists:get_value(size, Info)
+  ,Count = lists:foldl(fun
+    (Info, C) -> C + proplists:get_value(size, Info);
+    (undefined, C) -> C
   end, 0, Infos)
   ,NewWR = (Count * 2) < Capacity
   ,NewState = State#{want_replication => NewWR}
